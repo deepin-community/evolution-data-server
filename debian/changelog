@@ -1,0 +1,5 @@
+evolution-data-server (3.42.1-deepin) stable; urgency=medium
+
+  * ['Rebuild  against by  current gcc 11.2']
+
+ -- Deepin Packages Builder <packages@deepin.org>  Thu, 18 Aug 2022 13:51:03 +0800
