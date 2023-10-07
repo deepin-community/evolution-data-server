@@ -95,6 +95,8 @@ foreach_subcomponent (ICalComponent *icalcomp,
 	while (subcomp) {
 		ICalComponent *next_subcomp;
 
+		i_cal_object_set_owner (I_CAL_OBJECT (subcomp), G_OBJECT (icalcomp));
+
 		next_subcomp = i_cal_comp_iter_next (iter);
 
 		if (!func (icalcomp, subcomp, user_data)) {
@@ -126,8 +128,10 @@ foreach_property (ICalComponent *icalcomp,
 	for (prop = i_cal_component_get_first_property (icalcomp, prop_kind);
 	     prop;
 	     g_object_unref (prop), prop = i_cal_component_get_next_property (icalcomp, prop_kind)) {
-		if (!func (icalcomp, prop, user_data))
+		if (!func (icalcomp, prop, user_data)) {
+			g_object_unref (prop);
 			break;
+		}
 	}
 }
 
@@ -180,8 +184,7 @@ static ECalComponentText *
 get_text_from_prop (ICalProperty *prop,
 		    const gchar *(* get_prop_func) (ICalProperty *prop))
 {
-	ICalParameter *altrep_param;
-	const gchar *value, *altrep;
+	const gchar *value;
 
 	g_return_val_if_fail (prop != NULL, NULL);
 	g_return_val_if_fail (get_prop_func != NULL, NULL);
@@ -192,44 +195,26 @@ get_text_from_prop (ICalProperty *prop,
 	if (!value || !*value)
 		return NULL;
 
-	altrep_param = i_cal_property_get_first_parameter (prop, I_CAL_ALTREP_PARAMETER);
-	altrep = altrep_param ? i_cal_parameter_get_altrep (altrep_param) : NULL;
-	g_clear_object (&altrep_param);
-
-	if (altrep && !*altrep)
-		altrep = NULL;
-
-	return e_cal_component_text_new (value, altrep);
+	return e_cal_component_text_new_from_property (prop);
 }
 
-static void
-set_text_altrep_on_prop (ICalProperty *prop,
-			 const ECalComponentText *text)
+static ECalComponentText *
+get_text_for_locale (ICalComponent *icalcomp,
+		     ICalPropertyKind prop_kind,
+		     const gchar *locale)
 {
-	ICalParameter *param;
-	const gchar *altrep;
+	ECalComponentText *result = NULL;
+	ICalProperty *prop;
 
-	g_return_if_fail (prop != NULL);
-	g_return_if_fail (text != NULL);
+	prop = e_cal_util_component_find_property_for_locale (icalcomp, prop_kind, locale);
 
-	altrep = e_cal_component_text_get_altrep (text);
-	param = i_cal_property_get_first_parameter (prop, I_CAL_ALTREP_PARAMETER);
-
-	if (altrep && *altrep) {
-		if (param) {
-			i_cal_parameter_set_altrep (param, (gchar *) altrep);
-		} else {
-			param = i_cal_parameter_new_altrep ((gchar *) altrep);
-			i_cal_property_take_parameter (prop, param);
-			param = NULL;
-		}
-	} else if (param) {
-		i_cal_property_remove_parameter_by_kind (prop, I_CAL_ALTREP_PARAMETER);
+	if (prop) {
+		result = e_cal_component_text_new_from_property (prop);
+		g_clear_object (&prop);
 	}
 
-	g_clear_object (&param);
+	return result;
 }
-
 
 static void
 cal_component_finalize (GObject *object)
@@ -304,8 +289,8 @@ e_cal_component_new_vtype (ECalComponentVType vtype)
  *
  * Creates a new calendar component object from the given iCalendar string.
  *
- * Returns: (transfer full): A calendar component representing the given iCalendar string on
- * success, NULL if there was an error.
+ * Returns: (transfer full) (nullable): A calendar component representing
+ *    the given iCalendar string on success, %NULL if there was an error.
  *
  * Since: 3.34
  **/
@@ -333,8 +318,9 @@ e_cal_component_new_from_string (const gchar *calobj)
  * to e_cal_component_set_icalcomponent() fails, then @icalcomp
  * is freed.
  *
- * Returns: (transfer full): An #ECalComponent with @icalcomp assigned on success,
- * NULL if the @icalcomp cannot be assigned to #ECalComponent.
+ * Returns: (transfer full) (nullable): An #ECalComponent with @icalcomp
+ *    assigned on success, %NULL if the @icalcomp cannot be assigned to
+ *    #ECalComponent.
  *
  * Since: 3.34
  **/
@@ -1041,6 +1027,23 @@ e_cal_component_set_categories (ECalComponent *comp,
 	i_cal_component_take_property (comp->priv->icalcomp, prop);
 }
 
+static gboolean
+e_cal_component_get_categories_list_cb (ICalComponent *comp,
+					gchar **inout_category,
+					gpointer user_data)
+{
+	GSList **pcateg_list = user_data;
+
+	g_return_val_if_fail (pcateg_list != NULL, FALSE);
+	g_return_val_if_fail (inout_category != NULL, FALSE);
+	g_return_val_if_fail (*inout_category != NULL, FALSE);
+
+	*pcateg_list = g_slist_prepend (*pcateg_list, *inout_category);
+	*inout_category = NULL;
+
+	return TRUE;
+}
+
 /**
  * e_cal_component_get_categories_list:
  * @comp: A calendar component object.
@@ -1058,38 +1061,12 @@ e_cal_component_set_categories (ECalComponent *comp,
 GSList *
 e_cal_component_get_categories_list (ECalComponent *comp)
 {
-	ICalProperty *prop;
-	const gchar *categories;
-	const gchar *p;
-	const gchar *cat_start;
 	GSList *categ_list = NULL;
-	gchar *str;
 
 	g_return_val_if_fail (E_IS_CAL_COMPONENT (comp), NULL);
 	g_return_val_if_fail (comp->priv->icalcomp != NULL, NULL);
 
-	for (prop = i_cal_component_get_first_property (comp->priv->icalcomp, I_CAL_CATEGORIES_PROPERTY);
-	     prop;
-	     g_object_unref (prop), prop = i_cal_component_get_next_property (comp->priv->icalcomp, I_CAL_CATEGORIES_PROPERTY)) {
-		categories = i_cal_property_get_categories (prop);
-
-		if (!categories)
-			continue;
-
-		cat_start = categories;
-
-		for (p = categories; *p; p++) {
-			if (*p == ',') {
-				str = g_strndup (cat_start, p - cat_start);
-				categ_list = g_slist_prepend (categ_list, str);
-
-				cat_start = p + 1;
-			}
-		}
-
-		str = g_strndup (cat_start, p - cat_start);
-		categ_list = g_slist_prepend (categ_list, str);
-	}
+	e_cal_util_foreach_category (comp->priv->icalcomp, e_cal_component_get_categories_list_cb, &categ_list);
 
 	return g_slist_reverse (categ_list);
 }
@@ -1288,7 +1265,7 @@ set_text_list (ICalComponent *icalcomp,
 
 		prop = new_prop_func ((gchar *) e_cal_component_text_get_value (text));
 
-		set_text_altrep_on_prop (prop, text);
+		e_cal_component_text_fill_property (text, prop);
 
 		i_cal_component_take_property (icalcomp, prop);
 	}
@@ -1337,6 +1314,33 @@ e_cal_component_set_comments (ECalComponent *comp,
 	g_return_if_fail (comp->priv->icalcomp != NULL);
 
 	set_text_list (comp->priv->icalcomp, I_CAL_COMMENT_PROPERTY, i_cal_property_new_comment, text_list);
+}
+
+/**
+ * e_cal_component_dup_comment_for_locale:
+ * @comp: A calendar component object.
+ * @locale: (nullable): a locale identifier, or %NULL
+ *
+ * Returns a comment for the given @locale. When @locale is %NULL,
+ * the current locale is assumed. If no such comment for the locale
+ * exists either a comment with no language parameter or the first
+ * found is returned.
+ *
+ * Free the returned non-NULL #ECalComponentText with e_cal_component_text_free(),
+ * when no longer needed.
+ *
+ * Returns: (transfer full) (nullable): comment for the @locale, %NULL
+ *    if no comment is set on the @comp.
+ *
+ * Since: 3.46
+ **/
+ECalComponentText *
+e_cal_component_dup_comment_for_locale (ECalComponent *comp,
+					const gchar *locale)
+{
+	g_return_val_if_fail (E_IS_CAL_COMPONENT (comp), NULL);
+
+	return get_text_for_locale (comp->priv->icalcomp, I_CAL_COMMENT_PROPERTY, locale);
 }
 
 /**
@@ -1442,7 +1446,8 @@ set_icaltimetype (ICalComponent *icalcomp,
  * Free the returned non-NULL pointer with g_object_unref(), when
  * no longer needed.
  *
- * Returns: (transfer full): the completion date, as an #ICalTime, or %NULL, when none is set
+ * Returns: (transfer full) (nullable): the completion date, as an #ICalTime,
+ * or %NULL, when none is set
  *
  * Since: 3.34
  **/
@@ -1500,7 +1505,8 @@ e_cal_component_set_completed (ECalComponent *comp,
  * calendar store. Free the returned non-NULL pointer with g_object_unref(), when
  * no longer needed.
  *
- * Returns: (transfer full): the creation date, as an #ICalTime, or %NULL, when none is set
+ * Returns: (transfer full) (nullable): the creation date, as an #ICalTime, or
+ * %NULL, when none is set
  *
  * Since: 3.34
  **/
@@ -1544,7 +1550,7 @@ e_cal_component_set_created (ECalComponent *comp,
  * Queries the description of a calendar component object.  Journal components
  * may have more than one description, and as such this function returns a list
  * of #ECalComponentText structures.  All other types of components can have at
- * most one description. Free the returned #GSList with
+ * most one description for a single language. Free the returned #GSList with
  * g_slist_free_full (slist, e_cal_component_text_free);, when no longer needed.
  *
  * Returns: (transfer full) (element-type ECalComponentText) (nullable): the description
@@ -1581,6 +1587,33 @@ e_cal_component_set_descriptions (ECalComponent *comp,
 	g_return_if_fail (comp->priv->icalcomp != NULL);
 
 	set_text_list (comp->priv->icalcomp, I_CAL_DESCRIPTION_PROPERTY, i_cal_property_new_description, text_list);
+}
+
+/**
+ * e_cal_component_dup_description_for_locale:
+ * @comp: A calendar component object.
+ * @locale: (nullable): a locale identifier, or %NULL
+ *
+ * Returns a description for the given @locale. When @locale is %NULL,
+ * the current locale is assumed. If no such description for the locale
+ * exists either a description with no language parameter or the first
+ * found is returned.
+ *
+ * Free the returned non-NULL #ECalComponentText with e_cal_component_text_free(),
+ * when no longer needed.
+ *
+ * Returns: (transfer full) (nullable): description for the @locale, %NULL
+ *    if no description is set on the @comp.
+ *
+ * Since: 3.46
+ **/
+ECalComponentText *
+e_cal_component_dup_description_for_locale (ECalComponent *comp,
+					    const gchar *locale)
+{
+	g_return_val_if_fail (E_IS_CAL_COMPONENT (comp), NULL);
+
+	return get_text_for_locale (comp->priv->icalcomp, I_CAL_DESCRIPTION_PROPERTY, locale);
 }
 
 /* Gets a date/time and timezone pair */
@@ -1703,15 +1736,23 @@ set_datetime (ICalComponent *icalcomp,
 }
 
 /* This tries to get the DTSTART + DURATION for a VEVENT or VTODO. In a
- * VEVENT this is used for the DTEND if no DTEND exists, In a VTOTO it is
+ * VEVENT this is used for the DTEND if no DTEND exists. In a VTODO it is
  * used for the DUE date if DUE doesn't exist. */
 static ECalComponentDateTime *
 e_cal_component_get_start_plus_duration (ECalComponent *comp)
 {
 	ICalDuration *duration;
+	ICalProperty *prop;
 	ICalTime *tt;
 	ECalComponentDateTime *dt;
 	guint dur_days, dur_hours, dur_minutes, dur_seconds;
+
+	/* libical can calculate it from DTSTART/DTEND, which is not needed here */
+	prop = i_cal_component_get_first_property (comp->priv->icalcomp, I_CAL_DURATION_PROPERTY);
+	if (!prop)
+		return NULL;
+
+	g_clear_object (&prop);
 
 	duration = i_cal_component_get_duration (comp->priv->icalcomp);
 	if (!duration || i_cal_duration_is_null_duration (duration) || i_cal_duration_is_bad_duration (duration)) {
@@ -1776,10 +1817,13 @@ e_cal_component_get_dtend (ECalComponent *comp)
 	g_return_val_if_fail (E_IS_CAL_COMPONENT (comp), NULL);
 	g_return_val_if_fail (comp->priv->icalcomp != NULL, NULL);
 
+	if (e_cal_component_get_vtype (comp) != E_CAL_COMPONENT_EVENT &&
+	    e_cal_component_get_vtype (comp) != E_CAL_COMPONENT_FREEBUSY)
+		return NULL;
+
 	dt = get_datetime (comp->priv->icalcomp, I_CAL_DTEND_PROPERTY, i_cal_property_get_dtend, NULL);
 
-	/* If we don't have a DTEND property, then we try to get DTSTART
-	 * + DURATION. */
+	/* If we don't have a DTEND property, then we try to get DTSTART + DURATION. */
 	if (!dt)
 		dt = e_cal_component_get_start_plus_duration (comp);
 
@@ -1801,6 +1845,9 @@ e_cal_component_set_dtend (ECalComponent *comp,
 {
 	g_return_if_fail (E_IS_CAL_COMPONENT (comp));
 	g_return_if_fail (comp->priv->icalcomp != NULL);
+
+	g_warn_if_fail (e_cal_component_get_vtype (comp) == E_CAL_COMPONENT_EVENT ||
+			e_cal_component_get_vtype (comp) == E_CAL_COMPONENT_FREEBUSY);
 
 	set_datetime (comp->priv->icalcomp, I_CAL_DTEND_PROPERTY,
 		i_cal_property_new_dtend,
@@ -1949,10 +1996,12 @@ e_cal_component_get_due (ECalComponent *comp)
 	g_return_val_if_fail (E_IS_CAL_COMPONENT (comp), NULL);
 	g_return_val_if_fail (comp->priv->icalcomp != NULL, NULL);
 
+	if (e_cal_component_get_vtype (comp) != E_CAL_COMPONENT_TODO)
+		return NULL;
+
 	dt = get_datetime (comp->priv->icalcomp, I_CAL_DUE_PROPERTY, i_cal_property_get_due, NULL);
 
-	/* If we don't have a DTEND property, then we try to get DTSTART
-	 * + DURATION. */
+	/* If we don't have a DUE property, then we try to get DTSTART + DURATION. */
 	if (!dt)
 		dt = e_cal_component_get_start_plus_duration (comp);
 
@@ -1976,6 +2025,8 @@ e_cal_component_set_due (ECalComponent *comp,
 
 	g_return_if_fail (E_IS_CAL_COMPONENT (comp));
 	g_return_if_fail (comp->priv->icalcomp != NULL);
+
+	g_warn_if_fail (e_cal_component_get_vtype (comp) == E_CAL_COMPONENT_TODO);
 
 	set_datetime (comp->priv->icalcomp, I_CAL_DUE_PROPERTY,
 		i_cal_property_new_due,
@@ -2524,7 +2575,8 @@ e_cal_component_set_geo (ECalComponent *comp,
  * the calendar store. Free the returned non-NULL pointer with g_object_unref(),
  * when no longer needed.
  *
- * Returns: (transfer full): the last modified time, as an #ICalTime, or %NULL, when none is set
+ * Returns: (transfer full) (nullable): the last modified time, as an
+ * #ICalTime, or %NULL, when none is set
  *
  * Since: 3.34
  **/
@@ -3422,7 +3474,10 @@ e_cal_component_set_status (ECalComponent *comp,
  * e_cal_component_get_summary:
  * @comp: A calendar component object.
  *
- * Queries the summary of a calendar component object.
+ * Queries the summary of a calendar component object. It returns the first
+ * found summary property of the component. To get a summary suitable for a specific
+ * locale use e_cal_component_dup_summary_for_locale().
+ *
  * Free the returned pointer withe_cal_component_text_free(),
  * when no longer needed.
  *
@@ -3513,6 +3568,8 @@ set_alarm_description_cb (ICalComponent *icalcomp,
  *
  * Sets the summary of a calendar component object.
  *
+ * This also updates any alarm subcomponent descriptions, if needed.
+ *
  * Since: 3.34
  **/
 void
@@ -3520,23 +3577,29 @@ e_cal_component_set_summary (ECalComponent *comp,
 			     const ECalComponentText *summary)
 {
 	ICalProperty *prop;
+	GSList *to_remove, *link;
 	SetAlarmDescriptionData sadd;
 
 	g_return_if_fail (E_IS_CAL_COMPONENT (comp));
 	g_return_if_fail (comp->priv->icalcomp != NULL);
 
-	prop = i_cal_component_get_first_property (comp->priv->icalcomp, I_CAL_SUMMARY_PROPERTY);
+	to_remove = gather_all_properties (comp->priv->icalcomp, I_CAL_SUMMARY_PROPERTY, FALSE);
+
+	prop = to_remove ? to_remove->data : NULL;
 
 	if (!summary) {
-		if (prop) {
+		for (link = to_remove; link; link = g_slist_next (link)) {
+			prop = link->data;
+
 			i_cal_component_remove_property (comp->priv->icalcomp, prop);
-			g_object_unref (prop);
 		}
 
+		g_slist_free_full (to_remove, g_object_unref);
 		return;
 	}
 
 	if (!e_cal_component_text_get_value (summary)) {
+		g_slist_free_full (to_remove, g_object_unref);
 		g_clear_object (&prop);
 		return;
 	}
@@ -3545,16 +3608,22 @@ e_cal_component_set_summary (ECalComponent *comp,
 		/* Make a copy, to avoid use-after-free */
 		sadd.old_summary = g_strdup (i_cal_property_get_summary (prop));
 		i_cal_property_set_summary (prop, (gchar *) e_cal_component_text_get_value (summary));
-		set_text_altrep_on_prop (prop, summary);
+		e_cal_component_text_fill_property (summary, prop);
 	} else {
 		sadd.old_summary = NULL;
 		prop = i_cal_property_new_summary ((gchar *) e_cal_component_text_get_value (summary));
-		set_text_altrep_on_prop (prop, summary);
+		e_cal_component_text_fill_property (summary, prop);
 		i_cal_component_take_property (comp->priv->icalcomp, prop);
 		prop = NULL;
 	}
 
-	g_clear_object (&prop);
+	/* Skip the first, because it had been re-used */
+	for (link = to_remove ? to_remove->next : NULL; link; link = g_slist_next (link)) {
+		prop = link->data;
+		i_cal_component_remove_property (comp->priv->icalcomp, prop);
+	}
+
+	g_slist_free_full (to_remove, g_object_unref);
 
 	/* look for alarms that need a description */
 	sadd.new_summary = e_cal_component_text_get_value (summary);
@@ -3562,6 +3631,77 @@ e_cal_component_set_summary (ECalComponent *comp,
 	foreach_subcomponent (comp->priv->icalcomp, I_CAL_VALARM_COMPONENT, set_alarm_description_cb, &sadd);
 
 	g_free (sadd.old_summary);
+}
+
+/**
+ * e_cal_component_dup_summaries:
+ * @comp: A calendar component object.
+ *
+ * Queries the summary of a calendar component object. There can be one summary
+ * property per locale. Free the returned #GSList with
+ * g_slist_free_full (slist, e_cal_component_text_free);, when no longer needed.
+ *
+ * Returns: (transfer full) (element-type ECalComponentText) (nullable): the summary
+ *    properties and their parameters, as a #GSList of #ECalComponentText structures.
+ *
+ * Since: 3.46
+ **/
+GSList *
+e_cal_component_dup_summaries (ECalComponent *comp)
+{
+	g_return_val_if_fail (E_IS_CAL_COMPONENT (comp), NULL);
+	g_return_val_if_fail (comp->priv->icalcomp != NULL, NULL);
+
+	return get_text_list (comp->priv->icalcomp, I_CAL_SUMMARY_PROPERTY, i_cal_property_get_summary);
+}
+
+/**
+ * e_cal_component_set_summaries:
+ * @comp: A calendar component object.
+ * @text_list: (element-type ECalComponentText): List of #ECalComponentText structures.
+ *
+ * Sets the summary of a calendar component object. The summaries can have each
+ * different language, otherwise it's not allowed to have more than one summary property.
+ *
+ * This does not update any alarm subcomponent description.
+ *
+ * Since: 3.46
+ **/
+void
+e_cal_component_set_summaries (ECalComponent *comp,
+			       const GSList *text_list)
+{
+	g_return_if_fail (E_IS_CAL_COMPONENT (comp));
+	g_return_if_fail (comp->priv->icalcomp != NULL);
+
+	set_text_list (comp->priv->icalcomp, I_CAL_SUMMARY_PROPERTY, i_cal_property_new_summary, text_list);
+}
+
+/**
+ * e_cal_component_dup_summary_for_locale:
+ * @comp: A calendar component object.
+ * @locale: (nullable): a locale identifier, or %NULL
+ *
+ * Returns a summary for the given @locale. When @locale is %NULL,
+ * the current locale is assumed. If no such summary for the locale
+ * exists either a summary with no language parameter or the first
+ * found is returned.
+ *
+ * Free the returned non-NULL #ECalComponentText with e_cal_component_text_free(),
+ * when no longer needed.
+ *
+ * Returns: (transfer full) (nullable): summary for the @locale, %NULL
+ *    if no summary is set on the @comp.
+ *
+ * Since: 3.46
+ **/
+ECalComponentText *
+e_cal_component_dup_summary_for_locale (ECalComponent *comp,
+					const gchar *locale)
+{
+	g_return_val_if_fail (E_IS_CAL_COMPONENT (comp), NULL);
+
+	return get_text_for_locale (comp->priv->icalcomp, I_CAL_SUMMARY_PROPERTY, locale);
 }
 
 /**

@@ -18,6 +18,7 @@
 
 #include <glib/gi18n-lib.h>
 
+#include "e-data-server-util.h"
 #include "e-oauth2-service.h"
 #include "e-oauth2-service-base.h"
 
@@ -89,6 +90,7 @@ static const gchar *
 eos_yahoo_get_client_id (EOAuth2Service *service,
 			 ESource *source)
 {
+	static gchar glob_buff[128] = {0, };
 	const gchar *client_id;
 
 	client_id = eos_yahoo_read_settings (service, "oauth2-yahoo-client-id");
@@ -96,13 +98,14 @@ eos_yahoo_get_client_id (EOAuth2Service *service,
 	if (client_id && *client_id)
 		return client_id;
 
-	return YAHOO_CLIENT_ID;
+	return e_oauth2_service_util_compile_value (YAHOO_CLIENT_ID, glob_buff, sizeof (glob_buff));
 }
 
 static const gchar *
 eos_yahoo_get_client_secret (EOAuth2Service *service,
 			     ESource *source)
 {
+	static gchar glob_buff[128] = {0, };
 	const gchar *client_secret;
 
 	client_secret = eos_yahoo_read_settings (service, "oauth2-yahoo-client-secret");
@@ -110,7 +113,7 @@ eos_yahoo_get_client_secret (EOAuth2Service *service,
 	if (client_secret && *client_secret)
 		return client_secret;
 
-	return YAHOO_CLIENT_SECRET;
+	return e_oauth2_service_util_compile_value (YAHOO_CLIENT_SECRET, glob_buff, sizeof (glob_buff));
 }
 
 static const gchar *
@@ -160,53 +163,6 @@ eos_yahoo_prepare_authentication_uri_query (EOAuth2Service *service,
 	g_free (nonce_str);
 }
 
-static gboolean
-eos_yahoo_extract_authorization_code (EOAuth2Service *service,
-				      ESource *source,
-				      const gchar *page_title,
-				      const gchar *page_uri,
-				      const gchar *page_content,
-				      gchar **out_authorization_code)
-{
-	g_return_val_if_fail (out_authorization_code != NULL, FALSE);
-
-	*out_authorization_code = NULL;
-
-	if (page_uri && *page_uri) {
-		SoupURI *suri;
-
-		suri = soup_uri_new (page_uri);
-		if (suri) {
-			const gchar *query = soup_uri_get_query (suri);
-			gboolean known = FALSE;
-
-			if (query && *query) {
-				GHashTable *params;
-
-				params = soup_form_decode (query);
-				if (params) {
-					const gchar *response;
-
-					response = g_hash_table_lookup (params, "code");
-					if (response) {
-						*out_authorization_code = g_strdup (response);
-						known = TRUE;
-					}
-
-					g_hash_table_destroy (params);
-				}
-			}
-
-			soup_uri_free (suri);
-
-			if (known)
-				return TRUE;
-		}
-	}
-
-	return FALSE;
-}
-
 static void
 e_oauth2_service_yahoo_oauth2_service_init (EOAuth2ServiceInterface *iface)
 {
@@ -219,7 +175,6 @@ e_oauth2_service_yahoo_oauth2_service_init (EOAuth2ServiceInterface *iface)
 	iface->get_refresh_uri = eos_yahoo_get_refresh_uri;
 	iface->get_redirect_uri = eos_yahoo_get_redirect_uri;
 	iface->prepare_authentication_uri_query = eos_yahoo_prepare_authentication_uri_query;
-	iface->extract_authorization_code = eos_yahoo_extract_authorization_code;
 }
 
 static void

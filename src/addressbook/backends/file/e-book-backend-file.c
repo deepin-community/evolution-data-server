@@ -38,6 +38,7 @@
 #include <glib/gstdio.h>
 #include <glib/gi18n-lib.h>
 
+#include "e-book-sqlite-keys.h"
 #include "e-book-backend-file.h"
 
 #ifdef HAVE_LIBDB
@@ -74,6 +75,10 @@ struct _EBookBackendFilePrivate {
 	GList     *cursors;
 
 	EBookSqlite *sqlitedb;
+
+	EBookSqliteKeys *categories_table;
+	gboolean categories_changed_while_frozen;
+	gint categories_changed_frozen;
 };
 
 G_DEFINE_TYPE_WITH_CODE (
@@ -84,6 +89,202 @@ G_DEFINE_TYPE_WITH_CODE (
 	G_IMPLEMENT_INTERFACE (
 		G_TYPE_INITABLE,
 		e_book_backend_file_initable_init))
+
+static gboolean
+ebb_file_gather_categories_cb (EBookSqliteKeys *self,
+			       const gchar *key,
+			       const gchar *value,
+			       guint ref_count,
+			       gpointer user_data)
+{
+	GString **pcategories = user_data;
+
+	g_return_val_if_fail (pcategories != NULL, FALSE);
+
+	if (key && *key) {
+		if (!*pcategories) {
+			*pcategories = g_string_new (key);
+		} else {
+			g_string_append_c (*pcategories, ',');
+			g_string_append (*pcategories, key);
+		}
+	}
+
+	return TRUE;
+}
+
+static gchar *
+ebb_file_dup_categories (EBookBackendFile *self)
+{
+	GString *categories = NULL;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND_FILE (self), NULL);
+
+	e_book_sqlite_keys_foreach_sync (self->priv->categories_table,
+		ebb_file_gather_categories_cb, &categories, NULL, NULL);
+
+	if (categories)
+		return g_string_free (categories, FALSE);
+
+	return NULL;
+}
+
+static void
+ebb_file_emit_categories_changed (EBookBackendFile *self)
+{
+	gchar *categories;
+
+	g_return_if_fail (E_IS_BOOK_BACKEND_FILE (self));
+
+	if (g_atomic_int_get (&self->priv->categories_changed_frozen) > 0) {
+		self->priv->categories_changed_while_frozen = TRUE;
+		return;
+	}
+
+	categories = ebb_file_dup_categories (self);
+
+	e_book_backend_notify_property_changed (E_BOOK_BACKEND (self),
+		E_BOOK_BACKEND_PROPERTY_CATEGORIES, categories ? categories : "");
+
+	g_free (categories);
+}
+
+static void
+ebb_file_freeze_categories_changed (EBookBackendFile *self)
+{
+	g_return_if_fail (E_IS_BOOK_BACKEND_FILE (self));
+
+	g_atomic_int_inc (&self->priv->categories_changed_frozen);
+}
+
+static void
+ebb_file_thaw_categories_changed (EBookBackendFile *self)
+{
+	g_return_if_fail (E_IS_BOOK_BACKEND_FILE (self));
+	g_return_if_fail (g_atomic_int_get (&self->priv->categories_changed_frozen) > 0);
+
+	if (g_atomic_int_dec_and_test (&self->priv->categories_changed_frozen) &&
+	    self->priv->categories_changed_while_frozen) {
+		self->priv->categories_changed_while_frozen = FALSE;
+		ebb_file_emit_categories_changed (self);
+	}
+}
+
+static gboolean
+ebb_file_update_categories_table (EBookBackendFile *self,
+				  EContact *old_contact,
+				  EContact *new_contact,
+				  GCancellable *cancellable,
+				  GError **error)
+{
+	GHashTable *added = NULL, *removed = NULL;
+	GHashTableIter iter;
+	gpointer key;
+	gboolean success = TRUE;
+
+	ebb_file_freeze_categories_changed (self);
+
+	e_book_util_diff_categories (old_contact, new_contact, &added, &removed);
+
+	if (removed) {
+		g_hash_table_iter_init (&iter, removed);
+		while (success && g_hash_table_iter_next (&iter, &key, NULL)) {
+			const gchar *category = key;
+
+			success = e_book_sqlite_keys_remove_sync (self->priv->categories_table,
+				category, 1, cancellable, error);
+		}
+
+		g_hash_table_unref (removed);
+	}
+
+	if (added) {
+		g_hash_table_iter_init (&iter, added);
+		while (success && g_hash_table_iter_next (&iter, &key, NULL)) {
+			const gchar *category = key;
+
+			success = e_book_sqlite_keys_put_sync (self->priv->categories_table,
+				category, "", 1, cancellable, error);
+		}
+
+		g_hash_table_unref (added);
+	}
+
+	ebb_file_thaw_categories_changed (self);
+
+	return success;
+}
+
+static gboolean
+ebb_file_before_insert_contact_cb (EBookSqlite *ebsql,
+				   gpointer db, /* sqlite3 */
+				   EContact *contact,
+				   const gchar *extra,
+				   gboolean replace,
+				   GCancellable *cancellable,
+				   GError **error,
+				   gpointer user_data)
+{
+	EBookBackendFile *self = user_data;
+	EContact *old_contact = NULL;
+	gboolean success;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND_FILE (self), FALSE);
+
+	if (replace &&
+	    !ebsql_get_contact_unlocked (ebsql, e_contact_get_const (contact, E_CONTACT_UID), FALSE, &old_contact, NULL))
+		old_contact = NULL;
+
+	success = ebb_file_update_categories_table (self, old_contact, contact, cancellable, error);
+
+	g_clear_object (&old_contact);
+
+	return success;
+}
+
+static gboolean
+ebb_file_before_remove_contact_cb (EBookSqlite *ebsql,
+				   gpointer db, /* sqlite3 */
+				   const gchar *contact_uid,
+				   GCancellable *cancellable,
+				   GError **error,
+				   gpointer user_data)
+{
+	EBookBackendFile *self = user_data;
+	EContact *old_contact = NULL;
+	gboolean success;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND_FILE (self), FALSE);
+
+	if (!ebsql_get_contact_unlocked (ebsql, contact_uid, FALSE, &old_contact, NULL))
+		old_contact = NULL;
+
+	if (!old_contact)
+		return TRUE;
+
+	success = ebb_file_update_categories_table (self, old_contact, NULL, cancellable, error);
+
+	g_clear_object (&old_contact);
+
+	return success;
+}
+
+static gboolean
+ebb_file_check_fill_categories_cb (EBookSqlite *ebsql,
+				   gint ncols,
+				   const gchar *column_names[],
+				   const gchar *column_values[],
+				   gpointer user_data)
+{
+	gboolean *pfill_categories = user_data;
+
+	g_return_val_if_fail (pfill_categories != NULL, FALSE);
+
+	/* Table exists, do not fill it */
+	*pfill_categories = FALSE;
+
+	return FALSE;
+}
 
 /****************************************************************
  *                   File Management helper APIs                *
@@ -1006,6 +1207,28 @@ book_view_thread (gpointer user_data)
 	d (printf ("signalling parent thread\n"));
 	e_flag_set (closure->running);
 
+	if ((e_data_book_view_get_flags (book_view) & E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY) != 0) {
+		EBookBackend *backend = E_BOOK_BACKEND (bf);
+		EBookClientViewSortFields *sort_fields;
+		GObject *view_watcher;
+		gsize view_id;
+
+		view_id = e_data_book_view_get_id (book_view);
+		sort_fields = e_book_backend_dup_view_sort_fields (backend, view_id);
+
+		view_watcher = e_data_book_view_watcher_sqlite_new (backend, bf->priv->sqlitedb, book_view);
+		e_data_book_view_watcher_sqlite_take_sort_fields (E_DATA_BOOK_VIEW_WATCHER_SQLITE (view_watcher), sort_fields);
+
+		e_book_backend_take_view_user_data (backend, view_id, view_watcher);
+
+		if (e_flag_is_set (closure->running))
+			e_data_book_view_notify_complete (book_view, NULL /* Success */);
+
+		g_object_unref (book_view);
+
+		return NULL;
+	}
+
 	g_rw_lock_reader_lock (&(bf->priv->lock));
 	success = e_book_sqlite_search (
 		bf->priv->sqlitedb,
@@ -1072,6 +1295,8 @@ book_backend_file_dispose (GObject *object)
 
 	g_rw_lock_writer_unlock (&(bf->priv->lock));
 
+	g_clear_object (&bf->priv->categories_table);
+
 	G_OBJECT_CLASS (e_book_backend_file_parent_class)->dispose (object);
 }
 
@@ -1130,6 +1355,8 @@ book_backend_file_get_backend_property (EBookBackend *backend,
 		g_rw_lock_reader_unlock (&(bf->priv->lock));
 
 		return prop_value;
+	} else if (g_str_equal (prop_name, E_BOOK_BACKEND_PROPERTY_CATEGORIES)) {
+		return ebb_file_dup_categories (bf);
 	}
 
 	/* Chain up to parent's method. */
@@ -1737,6 +1964,62 @@ book_backend_file_get_contact_list_uids_sync (EBookBackendSync *backend,
 	return success;
 }
 
+static gboolean
+book_backend_file_gather_addresses_cb (gpointer ptr_name,
+				       gpointer ptr_email,
+				       gpointer user_data)
+{
+	GPtrArray *array = user_data;
+	const gchar *email = ptr_email;
+
+	if (email && *email)
+		g_ptr_array_add (array, e_book_query_field_test (E_CONTACT_EMAIL, E_BOOK_QUERY_IS, email));
+
+	return TRUE;
+}
+
+static gboolean
+book_backend_file_contains_email_sync (EBookBackendSync *backend,
+				       const gchar *email_address,
+				       GCancellable *cancellable,
+				       GError **error)
+{
+	EBookQuery *book_query = NULL;
+	GPtrArray *array;
+	gchar *sexp = NULL;
+	gboolean success = FALSE;
+
+	g_return_val_if_fail (email_address != NULL, FALSE);
+
+	d (printf ("book_backend_file_contains_email_sync (%s)\n", email_address));
+
+	array = g_ptr_array_new_full (1, (GDestroyNotify) e_book_query_unref);
+
+	e_book_util_foreach_address (email_address, book_backend_file_gather_addresses_cb, array);
+
+	if (array->len > 0)
+		book_query = e_book_query_or (array->len, (EBookQuery **) array->pdata, FALSE);
+
+	if (book_query)
+		sexp = e_book_query_to_string (book_query);
+
+	if (sexp) {
+		GSList *uids = NULL;
+
+		success = book_backend_file_get_contact_list_uids_sync (backend, sexp,
+			&uids, cancellable, error);
+		success = success && uids != NULL;
+
+		g_slist_free_full (uids, g_free);
+	}
+
+	g_clear_pointer (&book_query, e_book_query_unref);
+	g_ptr_array_unref (array);
+	g_free (sexp);
+
+	return success;
+}
+
 static void
 book_backend_file_start_view (EBookBackend *backend,
                               EDataBookView *book_view)
@@ -1760,6 +2043,8 @@ book_backend_file_stop_view (EBookBackend *backend,
 {
 	FileBackendSearchClosure *closure = get_closure (book_view);
 	gboolean need_join;
+
+	e_book_backend_take_view_user_data (backend, e_data_book_view_get_id (book_view), NULL);
 
 	if (!closure)
 		return;
@@ -1980,6 +2265,49 @@ book_backend_file_delete_cursor (EBookBackend *backend,
 	return link != NULL;
 }
 
+static void
+book_backend_file_set_view_sort_fields (EBookBackend *backend,
+					gsize view_id,
+					const EBookClientViewSortFields *fields)
+{
+	GObject *view_watcher;
+
+	g_return_if_fail (E_IS_BOOK_BACKEND (backend));
+
+	/* Chain up to parent's method */
+	E_BOOK_BACKEND_CLASS (e_book_backend_file_parent_class)->impl_set_view_sort_fields (backend, view_id, fields);
+
+	view_watcher = e_book_backend_ref_view_user_data (backend, view_id);
+
+	if (E_IS_DATA_BOOK_VIEW_WATCHER_SQLITE (view_watcher)) {
+		e_data_book_view_watcher_sqlite_take_sort_fields (E_DATA_BOOK_VIEW_WATCHER_SQLITE (view_watcher),
+			e_book_client_view_sort_fields_copy (fields));
+	}
+
+	g_clear_object (&view_watcher);
+}
+
+static GPtrArray *
+book_backend_file_dup_view_contacts (EBookBackend *backend,
+				     gsize view_id,
+				     guint range_start,
+				     guint range_length)
+{
+	GObject *view_watcher;
+	GPtrArray *contacts = NULL;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND (backend), NULL);
+
+	view_watcher = e_book_backend_ref_view_user_data (backend, view_id);
+
+	if (E_IS_DATA_BOOK_VIEW_WATCHER_SQLITE (view_watcher))
+		contacts = e_data_book_view_watcher_sqlite_dup_contacts (E_DATA_BOOK_VIEW_WATCHER_SQLITE (view_watcher), range_start, range_length);
+
+	g_clear_object (&view_watcher);
+
+	return contacts;
+}
+
 static gboolean
 book_backend_file_initable_init (GInitable *initable,
                                  GCancellable *cancellable,
@@ -1994,6 +2322,7 @@ book_backend_file_initable_init (GInitable *initable,
 	gchar *backup, *filename;
 #endif /* HAVE_LIBDB */
 	gchar *dirname, *fullpath;
+	gboolean fill_categories = FALSE;
 	gboolean success = TRUE;
 
 	priv = E_BOOK_BACKEND_FILE (initable)->priv;
@@ -2029,6 +2358,18 @@ book_backend_file_initable_init (GInitable *initable,
 			success = FALSE;
 			goto exit;
 		}
+
+		priv->categories_table = e_book_sqlite_keys_new (priv->sqlitedb, "categories", "category", "unusedvalue");
+
+		success = e_book_sqlite_keys_init_table_sync (priv->categories_table, cancellable, error);
+
+		if (!success)
+			goto exit;
+
+		g_signal_connect_object (priv->sqlitedb, "before-insert-contact",
+			G_CALLBACK (ebb_file_before_insert_contact_cb), initable, 0);
+		g_signal_connect_object (priv->sqlitedb, "before-remove-contact",
+			G_CALLBACK (ebb_file_before_remove_contact_cb), initable, 0);
 
 		/* Do the migration from BDB, see e-book-backend-file-migrate-bdb.c */
 		success = e_book_backend_file_migrate_bdb (
@@ -2076,6 +2417,24 @@ book_backend_file_initable_init (GInitable *initable,
 			goto exit;
 		}
 
+		fill_categories = TRUE;
+		e_book_sqlite_select (priv->sqlitedb, "PRAGMA table_info (categories)",
+			ebb_file_check_fill_categories_cb, &fill_categories, cancellable, NULL);
+
+		priv->categories_table = e_book_sqlite_keys_new (priv->sqlitedb, "categories", "category", "unusedvalue");
+
+		if (!fill_categories) {
+			g_signal_connect_object (priv->sqlitedb, "before-insert-contact",
+				G_CALLBACK (ebb_file_before_insert_contact_cb), initable, 0);
+			g_signal_connect_object (priv->sqlitedb, "before-remove-contact",
+				G_CALLBACK (ebb_file_before_remove_contact_cb), initable, 0);
+		}
+
+		success = e_book_sqlite_keys_init_table_sync (priv->categories_table, cancellable, error);
+
+		if (!success)
+			goto exit;
+
 		/* An sqlite DB only 'exists' if the populated flag is set. */
 		e_book_sqlite_get_key_value_int (
 			priv->sqlitedb,
@@ -2101,6 +2460,35 @@ book_backend_file_initable_init (GInitable *initable,
 				goto exit;
 		}
 	}
+
+	/* When the 'categories' table did not exist, traverse all contacts and populate it */
+	if (fill_categories) {
+		GSList *uids = NULL, *link;
+
+		if (e_book_sqlite_search_uids (priv->sqlitedb, NULL, &uids, cancellable, NULL)) {
+			EBookBackendFile *bbfile = E_BOOK_BACKEND_FILE (initable);
+
+			for (link = uids; link && !g_cancellable_is_cancelled (cancellable); link = g_slist_next (link)) {
+				const gchar *uid = link->data;
+				EContact *contact = NULL;
+
+				if (uid && e_book_sqlite_get_contact (priv->sqlitedb, uid, FALSE, &contact, NULL)) {
+					ebb_file_update_categories_table (bbfile, NULL, contact, cancellable, NULL);
+					g_clear_object (&contact);
+				}
+			}
+
+			g_slist_free_full (uids, g_free);
+		}
+
+		g_signal_connect_object (priv->sqlitedb, "before-insert-contact",
+			G_CALLBACK (ebb_file_before_insert_contact_cb), initable, 0);
+		g_signal_connect_object (priv->sqlitedb, "before-remove-contact",
+			G_CALLBACK (ebb_file_before_remove_contact_cb), initable, 0);
+	}
+
+	g_signal_connect_object (priv->categories_table, "changed",
+		G_CALLBACK (ebb_file_emit_categories_changed), initable, G_CONNECT_SWAPPED);
 
 	/* Load the locale */
 	e_book_backend_file_load_locale (E_BOOK_BACKEND_FILE (initable));
@@ -2141,6 +2529,7 @@ e_book_backend_file_class_init (EBookBackendFileClass *class)
 	backend_sync_class->get_contact_sync = book_backend_file_get_contact_sync;
 	backend_sync_class->get_contact_list_sync = book_backend_file_get_contact_list_sync;
 	backend_sync_class->get_contact_list_uids_sync = book_backend_file_get_contact_list_uids_sync;
+	backend_sync_class->contains_email_sync = book_backend_file_contains_email_sync;
 
 	backend_class = E_BOOK_BACKEND_CLASS (class);
 	backend_class->impl_get_backend_property = book_backend_file_get_backend_property;
@@ -2152,6 +2541,8 @@ e_book_backend_file_class_init (EBookBackendFileClass *class)
 	backend_class->impl_dup_locale = book_backend_file_dup_locale;
 	backend_class->impl_create_cursor = book_backend_file_create_cursor;
 	backend_class->impl_delete_cursor = book_backend_file_delete_cursor;
+	backend_class->impl_set_view_sort_fields = book_backend_file_set_view_sort_fields;
+	backend_class->impl_dup_view_contacts = book_backend_file_dup_view_contacts;
 }
 
 static void

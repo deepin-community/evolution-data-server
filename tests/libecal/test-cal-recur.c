@@ -68,12 +68,12 @@ create_component (const gchar *tz_location)
 
 	itt = i_cal_component_get_dtstart (icomp);
 	g_assert_nonnull (itt);
-	g_assert (i_cal_time_get_timezone (itt) == zone);
+	g_assert_true (i_cal_time_get_timezone (itt) == zone);
 	g_object_unref (itt);
 
 	itt = i_cal_component_get_dtend (icomp);
 	g_assert_nonnull (itt);
-	g_assert (i_cal_time_get_timezone (itt) == zone);
+	g_assert_true (i_cal_time_get_timezone (itt) == zone);
 	g_object_unref (itt);
 
 	return icomp;
@@ -95,7 +95,7 @@ setup_cal (ECalClient *cal_client,
 
 	success = e_cal_client_create_object_sync (cal_client, icomp, E_CAL_OPERATION_FLAG_NONE, &uid, NULL, &error);
 	g_assert_no_error (error);
-	g_assert (success);
+	g_assert_true (success);
 	g_assert_nonnull (uid);
 
 	g_object_unref (icomp);
@@ -179,7 +179,7 @@ verify_received_instances (GHashTable *instances,
 		g_assert_nonnull (expected_start);
 
 		ins.start = expected_start;
-		g_assert (g_hash_table_remove (instances, &ins));
+		g_assert_true (g_hash_table_remove (instances, &ins));
 
 		g_object_unref (expected_start);
 	}
@@ -246,7 +246,7 @@ test_recur_plain_run (ECalClient *client,
 		e_cal_client_tzlookup_cb, client,
 		default_zone, NULL, &error);
 	g_assert_no_error (error);
-	g_assert (success);
+	g_assert_true (success);
 
 	g_assert_cmpint (g_hash_table_size (rd.instances), ==, 5);
 
@@ -363,6 +363,151 @@ test_recur_plain (ETestServerFixture *fixture,
 	}
 }
 
+static ICalComponent *
+create_component_midnight (const gchar *tz_location)
+{
+	const gchar *comp_str =
+		"BEGIN:VEVENT\r\n"
+		"SUMMARY:recurs\r\n"
+		"UID:recurs-id\r\n"
+		"DTSTART%s:20190107T000000%s\r\n"
+		"DTEND%s:20190107T003000%s\r\n"
+		"DTSTAMP:20190101T050000Z\r\n"
+		"CREATED:20190101T050000Z\r\n"
+		"LAST-MODIFIED:20190101T050000Z\r\n"
+		"RRULE:FREQ=DAILY;UNTIL=20190109\r\n"
+		"END:VEVENT\r\n";
+	gchar *tzref = NULL, tzsuffix[2] = { 0, 0 };
+	gchar *str;
+	ICalComponent *icomp;
+	ICalTimezone *zone = NULL;
+	ICalTime *itt;
+
+	if (tz_location) {
+		if (g_ascii_strcasecmp (tz_location, "UTC") == 0) {
+			tzsuffix[0] = 'Z';
+			zone = i_cal_timezone_get_utc_timezone ();
+		} else {
+			const gchar *tzid;
+
+			zone = i_cal_timezone_get_builtin_timezone (tz_location);
+			g_assert_nonnull (zone);
+
+			tzid = i_cal_timezone_get_tzid (zone);
+			g_assert_nonnull (tzid);
+
+			tzref = g_strconcat (";TZID=", tzid, NULL);
+		}
+	}
+
+	str = g_strdup_printf (comp_str, tzref ? tzref : "", tzsuffix, tzref ? tzref : "", tzsuffix);
+	icomp = i_cal_component_new_from_string (str);
+	g_assert_nonnull (icomp);
+
+	g_free (tzref);
+	g_free (str);
+
+	itt = i_cal_component_get_dtstart (icomp);
+	g_assert_nonnull (itt);
+	g_assert_true (i_cal_time_get_timezone (itt) == zone);
+	g_object_unref (itt);
+
+	itt = i_cal_component_get_dtend (icomp);
+	g_assert_nonnull (itt);
+	g_assert_true (i_cal_time_get_timezone (itt) == zone);
+	g_object_unref (itt);
+
+	return icomp;
+}
+
+static void
+setup_cal_midnight (ECalClient *cal_client,
+		    const gchar *tz_location)
+{
+	ICalComponent *icomp;
+	gboolean success;
+	gchar *uid = NULL;
+	GError *error = NULL;
+
+	icomp = create_component_midnight (tz_location);
+
+	if (!e_cal_client_remove_object_sync (cal_client, i_cal_component_get_uid (icomp), NULL, E_CAL_OBJ_MOD_ALL, E_CAL_OPERATION_FLAG_NONE, NULL, &error)) {
+		g_assert_error (error, E_CAL_CLIENT_ERROR, E_CAL_CLIENT_ERROR_OBJECT_NOT_FOUND);
+		g_clear_error (&error);
+	} else {
+		g_assert_no_error (error);
+	}
+
+	success = e_cal_client_create_object_sync (cal_client, icomp, E_CAL_OPERATION_FLAG_NONE, &uid, NULL, &error);
+	g_assert_no_error (error);
+	g_assert_true (success);
+	g_assert_nonnull (uid);
+
+	g_object_unref (icomp);
+	g_free (uid);
+}
+
+static gboolean
+recur_instance_midnight_cb (ICalComponent *icomp,
+			    ICalTime *instance_start,
+			    ICalTime *instance_end,
+			    gpointer user_data,
+			    GCancellable *cancellable,
+			    GError **error)
+{
+	GSList **listp = user_data;
+
+	*listp = g_slist_append (*listp, i_cal_time_as_ical_string (instance_start));
+
+	return TRUE;
+}
+
+static void
+test_recur_midnight_for_zone (ECalClient *client,
+			      const gchar *tz_location)
+{
+	ICalTime *start, *end;
+	GSList *list = NULL, *last;
+
+	setup_cal_midnight (client, tz_location);
+
+	start = i_cal_time_new_from_string ("20190101T000000Z");
+	end = i_cal_time_new_from_string ("20190131T000000Z");
+
+	e_cal_client_generate_instances_sync (client,
+		i_cal_time_as_timet (start),
+		i_cal_time_as_timet (end),
+		NULL, /* GCancellable * */
+		recur_instance_midnight_cb, &list);
+
+	last = g_slist_last (list);
+	g_assert_nonnull (last);
+	if (g_ascii_strcasecmp (tz_location, "UTC") == 0)
+		g_assert_cmpstr (last->data, ==, "20190109T000000Z");
+	else
+		g_assert_cmpstr (last->data, ==, "20190109T000000");
+	g_assert_cmpint (g_slist_length (list), ==, 3);
+
+	g_slist_free_full (list, g_free);
+	g_clear_object (&start);
+	g_clear_object (&end);
+}
+
+static void
+test_recur_midnight (ETestServerFixture *fixture,
+		     gconstpointer user_data)
+{
+	ECalClient *client;
+
+	client = E_TEST_SERVER_UTILS_SERVICE (fixture, ECalClient);
+
+	e_cal_client_set_default_timezone (client, i_cal_timezone_get_builtin_timezone ("UTC"));
+
+	test_recur_midnight_for_zone (client, "UTC");
+	test_recur_midnight_for_zone (client, "America/New_York");
+	test_recur_midnight_for_zone (client, "Europe/Berlin");
+}
+
 static void
 test_recur_client (ETestServerFixture *fixture,
 		   gconstpointer user_data)
@@ -431,7 +576,7 @@ test_recur_exdate_component (const gchar *comp_str)
 		NULL, &error);
 
 	g_assert_no_error (error);
-	g_assert (success);
+	g_assert_true (success);
 	g_assert_cmpint (found, ==, 2);
 
 	found = 0;
@@ -443,7 +588,7 @@ test_recur_exdate_component (const gchar *comp_str)
 		NULL, &error);
 
 	g_assert_no_error (error);
-	g_assert (success);
+	g_assert_true (success);
 	g_assert_cmpint (found, ==, 2);
 
 	g_object_unref (start);
@@ -556,7 +701,7 @@ test_recur_duration (ETestServerFixture *fixture,
 		NULL, &error);
 
 	g_assert_no_error (error);
-	g_assert (success);
+	g_assert_true (success);
 	g_assert_cmpint (dd.n_found, ==, 8);
 
 	dd.n_found = 0;
@@ -568,7 +713,7 @@ test_recur_duration (ETestServerFixture *fixture,
 		NULL, &error);
 
 	g_assert_no_error (error);
-	g_assert (success);
+	g_assert_true (success);
 	g_assert_cmpint (dd.n_found, ==, 8);
 
 	dd.n_found = 0;
@@ -580,7 +725,7 @@ test_recur_duration (ETestServerFixture *fixture,
 		NULL, &error);
 
 	g_assert_no_error (error);
-	g_assert (success);
+	g_assert_true (success);
 	g_assert_cmpint (dd.n_found, ==, 8);
 
 	g_object_unref (start);
@@ -622,6 +767,13 @@ main (gint argc,
 		&test_closure,
 		e_test_server_utils_setup,
 		test_recur_duration,
+		e_test_server_utils_teardown);
+	g_test_add (
+		"/ECalRecur/Midnight",
+		ETestServerFixture,
+		&test_closure,
+		e_test_server_utils_setup,
+		test_recur_midnight,
 		e_test_server_utils_teardown);
 
 	return e_test_server_utils_run (argc, argv);

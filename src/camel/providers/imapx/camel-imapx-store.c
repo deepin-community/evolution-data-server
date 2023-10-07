@@ -124,8 +124,7 @@ imapx_name_hash (gconstpointer key)
 {
 	const gchar *mailbox = key;
 
-	if (camel_imapx_mailbox_is_inbox (mailbox))
-		mailbox = "INBOX";
+	mailbox = camel_imapx_normalize_inbox_name (mailbox);
 
 	return g_str_hash (mailbox);
 }
@@ -137,11 +136,8 @@ imapx_name_equal (gconstpointer a,
 	const gchar *mailbox_a = a;
 	const gchar *mailbox_b = b;
 
-	if (camel_imapx_mailbox_is_inbox (mailbox_a))
-		mailbox_a = "INBOX";
-
-	if (camel_imapx_mailbox_is_inbox (mailbox_b))
-		mailbox_b = "INBOX";
+	mailbox_a = camel_imapx_normalize_inbox_name (mailbox_a);
+	mailbox_b = camel_imapx_normalize_inbox_name (mailbox_b);
 
 	return g_str_equal (mailbox_a, mailbox_b);
 }
@@ -595,6 +591,7 @@ imapx_store_process_mailbox_attributes (CamelIMAPXStore *store,
 	CamelIMAPXStoreInfo *si;
 	CamelStoreInfoFlags flags;
 	CamelSettings *settings;
+	gboolean in_personal_namespace;
 	gboolean use_subscriptions;
 	gboolean mailbox_is_subscribed;
 	gboolean mailbox_is_nonexistent;
@@ -624,6 +621,9 @@ imapx_store_process_mailbox_attributes (CamelIMAPXStore *store,
 		camel_imapx_mailbox_has_attribute (
 		mailbox, CAMEL_IMAPX_LIST_ATTR_NONEXISTENT);
 
+	in_personal_namespace = camel_imapx_namespace_get_category (
+		camel_imapx_mailbox_get_namespace (mailbox)) == CAMEL_IMAPX_NAMESPACE_PERSONAL;
+
 	/* XXX The flags type transforms from CamelStoreInfoFlags
 	 *     to CamelFolderInfoFlags about half-way through this.
 	 *     We should really eliminate the confusing redundancy. */
@@ -649,8 +649,10 @@ imapx_store_process_mailbox_attributes (CamelIMAPXStore *store,
 	}
 
 	/* Check whether the flags disagree. */
-	if (si->info.flags != flags) {
+	if (si->info.flags != flags ||
+	    (!si->in_personal_namespace) != (!in_personal_namespace)) {
 		si->info.flags = flags;
+		si->in_personal_namespace = in_personal_namespace;
 		camel_store_summary_touch (store->summary);
 	}
 
@@ -1132,12 +1134,11 @@ get_folder_offline (CamelStore *store,
 	service = CAMEL_SERVICE (store);
 	user_cache_dir = camel_service_get_user_cache_dir (service);
 
-	if (g_ascii_strcasecmp (folder_name, "INBOX") == 0)
-		folder_name = "INBOX";
+	folder_name = camel_imapx_normalize_inbox_name (folder_name);
 
 	si = camel_store_summary_path (imapx_store->summary, folder_name);
 
-	if (si != NULL) {
+	if (si != NULL && !(si->flags & CAMEL_STORE_INFO_FOLDER_NOSELECT)) {
 		gchar *base_dir;
 		gchar *folder_dir;
 
@@ -1147,14 +1148,15 @@ get_folder_offline (CamelStore *store,
 			store, folder_dir, folder_name, error);
 		g_free (folder_dir);
 		g_free (base_dir);
-
-		camel_store_summary_info_unref (imapx_store->summary, si);
 	} else {
 		g_set_error (
 			error, CAMEL_STORE_ERROR,
 			CAMEL_STORE_ERROR_NO_FOLDER,
 			_("No such folder %s"), folder_name);
 	}
+
+	if (si)
+		camel_store_summary_info_unref (imapx_store->summary, si);
 
 	return new_folder;
 }
@@ -1252,6 +1254,7 @@ get_folder_info_offline (CamelStore *store,
 	CamelFolderInfo *fi;
 	GPtrArray *folders;
 	GPtrArray *array;
+	gchar *str_namespace = NULL;
 	gboolean use_subscriptions;
 	gint top_len;
 	guint ii;
@@ -1290,8 +1293,6 @@ get_folder_info_offline (CamelStore *store,
 	use_subscriptions = camel_imapx_settings_get_use_subscriptions (
 		CAMEL_IMAPX_SETTINGS (settings));
 
-	g_object_unref (settings);
-
 	/* FIXME: obey other flags */
 
 	folders = g_ptr_array_new ();
@@ -1318,7 +1319,7 @@ get_folder_info_offline (CamelStore *store,
 
 		si = g_ptr_array_index (array, ii);
 		folder_path = camel_store_info_path (imapx_store->summary, si);
-		si_is_inbox = (g_ascii_strcasecmp (folder_path, "INBOX") == 0);
+		si_is_inbox = camel_imapx_mailbox_is_inbox (folder_path);
 
 		/* Filter by folder path. */
 		si_is_match =
@@ -1342,7 +1343,7 @@ get_folder_info_offline (CamelStore *store,
 		 * that case.
 		 */
 		si_is_match =
-			!use_subscriptions ||
+			!use_subscriptions || si_is_inbox ||
 			(si->flags & CAMEL_STORE_INFO_FOLDER_SUBSCRIBED) ||
 			!(flags & CAMEL_STORE_FOLDER_INFO_SUBSCRIBED) ||
 			(flags & CAMEL_STORE_FOLDER_INFO_SUBSCRIPTION_LIST);
@@ -1351,17 +1352,10 @@ get_folder_info_offline (CamelStore *store,
 			continue;
 
 		if (!si_is_inbox && !use_subscriptions && !(si->flags & CAMEL_STORE_INFO_FOLDER_SUBSCRIBED) &&
-		    !(flags & CAMEL_STORE_FOLDER_INFO_SUBSCRIPTION_LIST)) {
-			CamelIMAPXMailbox *mailbox;
-
-			mailbox = camel_imapx_store_ref_mailbox (imapx_store, ((CamelIMAPXStoreInfo *) si)->mailbox_name);
-			if (!mailbox || camel_imapx_namespace_get_category (camel_imapx_mailbox_get_namespace (mailbox)) != CAMEL_IMAPX_NAMESPACE_PERSONAL) {
-				/* Skip unsubscribed mailboxes which are not in the Personal namespace */
-				g_clear_object (&mailbox);
-				continue;
-			}
-
-			g_clear_object (&mailbox);
+		    !(flags & CAMEL_STORE_FOLDER_INFO_SUBSCRIPTION_LIST) &&
+		    !((CamelIMAPXStoreInfo *) si)->in_personal_namespace) {
+			/* Skip unsubscribed mailboxes which are not in the Personal namespace */
+			continue;
 		}
 
 		fi = imapx_store_build_folder_info (imapx_store, folder_path, 0);
@@ -1412,9 +1406,34 @@ get_folder_info_offline (CamelStore *store,
 
 	camel_store_summary_array_free (imapx_store->summary, array);
 
+	if (!*top && camel_imapx_settings_get_use_namespace (CAMEL_IMAPX_SETTINGS (settings))) {
+		str_namespace = camel_imapx_settings_dup_namespace (CAMEL_IMAPX_SETTINGS (settings));
+		if (str_namespace && *str_namespace) {
+			/* Remove the namespace top folder, it's not meant to stay visible */
+			for (ii = 0; ii < folders->len; ii++) {
+				fi = g_ptr_array_index (folders, ii);
+				if (g_strcmp0 (fi->full_name, str_namespace) == 0) {
+					g_ptr_array_remove_index (folders, ii);
+					camel_folder_info_free (fi);
+					break;
+				}
+			}
+
+			if (!g_str_has_suffix (str_namespace, "/")) {
+				gchar *tmp = g_strconcat (str_namespace, "/", NULL);
+				g_free (str_namespace);
+				str_namespace = tmp;
+			}
+
+			top = str_namespace;
+		}
+	}
+
 	fi = camel_folder_info_build (folders, top, '/', TRUE);
 
 	g_ptr_array_free (folders, TRUE);
+	g_object_unref (settings);
+	g_free (str_namespace);
 
 	return fi;
 }
@@ -1747,7 +1766,8 @@ imapx_store_mailbox_is_unknown (CamelIMAPXStore *imapx_store,
 			si = g_ptr_array_index (store_infos, ii);
 
 			if (si->mailbox_name && g_str_has_prefix (si->mailbox_name, mailbox_with_separator) && (
-			    !use_subscriptions || (((CamelStoreInfo *) si)->flags & CAMEL_STORE_INFO_FOLDER_SUBSCRIBED) != 0)) {
+			    !use_subscriptions || (((CamelStoreInfo *) si)->flags & CAMEL_STORE_INFO_FOLDER_SUBSCRIBED) != 0) &&
+			    !imapx_store_mailbox_is_unknown (imapx_store, store_infos, si)) {
 				/* This can be a 'virtual' parent folder of some subscribed subfolder */
 				break;
 			}
@@ -1756,6 +1776,8 @@ imapx_store_mailbox_is_unknown (CamelIMAPXStore *imapx_store,
 		is_unknown = ii == store_infos->len;
 
 		g_free (mailbox_with_separator);
+	} else if (!mailbox) {
+		is_unknown = TRUE;
 	}
 
 	g_clear_object (&mailbox);
@@ -1962,10 +1984,11 @@ imapx_can_refresh_folder (CamelStore *store,
 
 	subscribed = ((info->flags & CAMEL_FOLDER_SUBSCRIBED) != 0);
 
-	res = store_class->can_refresh_folder (store, info, &local_error) ||
-		check_all || (check_subscribed && subscribed);
+	res = !(info->flags & CAMEL_FOLDER_NOSELECT) && (
+		store_class->can_refresh_folder (store, info, &local_error) ||
+		check_all || (check_subscribed && subscribed));
 
-	if (!res && !local_error) {
+	if (!res && !local_error && !(info->flags & CAMEL_FOLDER_NOSELECT)) {
 		CamelFolder *folder;
 
 		folder = camel_store_get_folder_sync (store, info->full_name, 0, NULL, &local_error);
@@ -2276,6 +2299,7 @@ imapx_store_create_folder_sync (CamelStore *store,
 	CamelFolder *folder;
 	CamelIMAPXMailbox *parent_mailbox = NULL;
 	CamelFolderInfo *fi = NULL;
+	CamelStoreInfo *si;
 	GList *list;
 	const gchar *namespace_prefix;
 	const gchar *parent_mailbox_name;
@@ -2291,6 +2315,16 @@ imapx_store_create_folder_sync (CamelStore *store,
 
 	/* Obtain the separator from the parent CamelIMAPXMailbox. */
 
+	si = camel_store_summary_path (imapx_store->summary, parent_name);
+
+	if (!si || (si->flags & CAMEL_STORE_INFO_FOLDER_NOSELECT) != 0) {
+		if (si)
+			camel_store_summary_info_unref (imapx_store->summary, si);
+		goto check_namespace;
+	}
+
+	camel_store_summary_info_unref (imapx_store->summary, si);
+
 	folder = camel_store_get_folder_sync (
 		store, parent_name, 0, cancellable, error);
 
@@ -2304,6 +2338,17 @@ imapx_store_create_folder_sync (CamelStore *store,
 		goto exit;
 
 	separator = camel_imapx_mailbox_get_separator (parent_mailbox);
+
+	/* NIL separator means flat structure, where subfolders cannot be created */
+	if (!separator) {
+		g_set_error_literal (
+			error, CAMEL_FOLDER_ERROR,
+			CAMEL_FOLDER_ERROR_INVALID_PATH,
+			_("The account does not support folder hierarchy. Create the folder on the account level instead."));
+		g_object_unref (parent_mailbox);
+		goto exit;
+	}
+
 	parent_mailbox_name = camel_imapx_mailbox_get_name (parent_mailbox);
 
 	mailbox_name = g_strdup_printf (
@@ -2342,7 +2387,7 @@ check_namespace:
 
 check_separator:
 
-	if (strchr (folder_name, separator) != NULL) {
+	if (separator && strchr (folder_name, separator) != NULL) {
 		g_set_error (
 			error, CAMEL_FOLDER_ERROR,
 			CAMEL_FOLDER_ERROR_INVALID_PATH,
@@ -2842,20 +2887,22 @@ imapx_store_dup_downsync_folders_recurse (CamelStore *store,
 					  GPtrArray **inout_folders)
 {
 	while (info) {
-		CamelFolder *folder;
-
 		if (info->child)
 			imapx_store_dup_downsync_folders_recurse (store, info->child, inout_folders);
 
-		folder = camel_store_get_folder_sync (store, info->full_name, 0, NULL, NULL);
-		if (folder && CAMEL_IS_IMAPX_FOLDER (folder) &&
-		    camel_offline_folder_can_downsync (CAMEL_OFFLINE_FOLDER (folder))) {
-			if (!*inout_folders)
-				*inout_folders = g_ptr_array_sized_new (32);
-			g_ptr_array_add (*inout_folders, g_object_ref (folder));
-		}
+		if (!(info->flags & CAMEL_FOLDER_NOSELECT)) {
+			CamelFolder *folder;
 
-		g_clear_object (&folder);
+			folder = camel_store_get_folder_sync (store, info->full_name, 0, NULL, NULL);
+			if (folder && CAMEL_IS_IMAPX_FOLDER (folder) &&
+			    camel_offline_folder_can_downsync (CAMEL_OFFLINE_FOLDER (folder))) {
+				if (!*inout_folders)
+					*inout_folders = g_ptr_array_sized_new (32);
+				g_ptr_array_add (*inout_folders, g_object_ref (folder));
+			}
+
+			g_clear_object (&folder);
+		}
 
 		info = info->next;
 	}
@@ -3010,8 +3057,7 @@ imapx_store_folder_is_subscribed (CamelSubscribable *subscribable,
 	if (folder_name && *folder_name == '/')
 		folder_name++;
 
-	if (g_ascii_strcasecmp (folder_name, "INBOX") == 0)
-		folder_name = "INBOX";
+	folder_name = camel_imapx_normalize_inbox_name (folder_name);
 
 	si = camel_store_summary_path (imapx_store->summary, folder_name);
 	if (si != NULL) {
@@ -3152,12 +3198,20 @@ imapx_store_unsubscribe_folder_sync (CamelSubscribable *subscribable,
 	success = camel_imapx_conn_manager_unsubscribe_mailbox_sync (conn_man, mailbox, cancellable, error);
 
 	if (success) {
-		CamelFolderInfo *fi;
+		CamelSettings *settings;
 
-		fi = imapx_store_build_folder_info (
-			CAMEL_IMAPX_STORE (subscribable), folder_name, 0);
-		camel_subscribable_folder_unsubscribed (subscribable, fi);
-		camel_folder_info_free (fi);
+		settings = camel_service_ref_settings (CAMEL_SERVICE (imapx_store));
+
+		/* Notify about unsubscribed folder only if showing subscribed folders only */
+		if (camel_imapx_settings_get_use_subscriptions (CAMEL_IMAPX_SETTINGS (settings))) {
+			CamelFolderInfo *fi;
+
+			fi = imapx_store_build_folder_info (imapx_store, folder_name, 0);
+			camel_subscribable_folder_unsubscribed (subscribable, fi);
+			camel_folder_info_free (fi);
+		}
+
+		g_clear_object (&settings);
 	}
 
 exit:
@@ -3579,8 +3633,7 @@ imapx_store_ref_mailbox_unlocked (CamelIMAPXStore *imapx_store,
 	g_return_val_if_fail (mailbox_name != NULL, NULL);
 
 	/* The INBOX mailbox is case-insensitive. */
-	if (g_ascii_strcasecmp (mailbox_name, "INBOX") == 0)
-		mailbox_name = "INBOX";
+	mailbox_name = camel_imapx_normalize_inbox_name (mailbox_name);
 
 	mailbox = g_hash_table_lookup (imapx_store->priv->mailboxes, mailbox_name);
 
@@ -3672,9 +3725,18 @@ imapx_store_create_mailbox_unlocked (CamelIMAPXStore *imapx_store,
 		g_object_unref (namespace);
 
 	} else {
-		g_warning (
-			"%s: No matching namespace for \"%c\" %s",
-			G_STRFUNC, separator, mailbox_name);
+		CamelSettings *settings;
+
+		settings = camel_service_ref_settings (CAMEL_SERVICE (imapx_store));
+
+		/* warn only if not overriding the namespace */
+		if (!camel_imapx_settings_get_use_namespace (CAMEL_IMAPX_SETTINGS (settings))) {
+			g_warning (
+				"%s: No matching namespace for \"%c\" %s",
+				G_STRFUNC, separator, mailbox_name);
+		}
+
+		g_clear_object (&settings);
 	}
 
 	g_object_unref (namespace_response);
@@ -3795,7 +3857,7 @@ camel_imapx_store_ref_mailbox (CamelIMAPXStore *imapx_store,
  * camel_imapx_store_list_mailboxes:
  * @imapx_store: a #CamelIMAPXStore
  * @namespace_: a #CamelIMAPXNamespace
- * @pattern: mailbox name with possible wildcards, or %NULL
+ * @pattern: (nullable): mailbox name with possible wildcards, or %NULL
  *
  * Returns a list of #CamelIMAPXMailbox instances which match @namespace and
  * @pattern. The @pattern may contain wildcard characters '*' and '%', which
@@ -3879,6 +3941,7 @@ camel_imapx_store_handle_list_response (CamelIMAPXStore *imapx_store,
 					CamelIMAPXListResponse *response)
 {
 	CamelIMAPXMailbox *mailbox = NULL;
+	CamelSettings *settings;
 	const gchar *mailbox_name;
 	const gchar *old_mailbox_name;
 	gboolean emit_mailbox_created = FALSE;
@@ -3888,6 +3951,31 @@ camel_imapx_store_handle_list_response (CamelIMAPXStore *imapx_store,
 	g_return_if_fail (CAMEL_IS_IMAPX_STORE (imapx_store));
 	g_return_if_fail (CAMEL_IS_IMAPX_SERVER (imapx_server));
 	g_return_if_fail (CAMEL_IS_IMAPX_LIST_RESPONSE (response));
+
+	settings = camel_service_ref_settings (CAMEL_SERVICE (imapx_store));
+	if (camel_imapx_settings_get_use_namespace (CAMEL_IMAPX_SETTINGS (settings))) {
+		gchar *str_namespace = camel_imapx_settings_dup_namespace (CAMEL_IMAPX_SETTINGS (settings));
+		gboolean ignore_toplevel_user_namespace = FALSE;
+
+		if (str_namespace && *str_namespace) {
+			gchar *folder_path = camel_imapx_mailbox_to_folder_path (
+				camel_imapx_list_response_get_mailbox_name (response),
+				camel_imapx_list_response_get_separator (response));
+
+			ignore_toplevel_user_namespace = g_strcmp0 (str_namespace, folder_path) == 0;
+
+			g_free (folder_path);
+		}
+
+		g_free (str_namespace);
+
+		if (ignore_toplevel_user_namespace) {
+			g_clear_object (&settings);
+			return;
+		}
+	}
+
+	g_clear_object (&settings);
 
 	mailbox_name = camel_imapx_list_response_get_mailbox_name (response);
 	old_mailbox_name = camel_imapx_list_response_get_oldname (response);

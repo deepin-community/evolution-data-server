@@ -58,6 +58,10 @@
 
 #define MAX_COMMAND_LEN 1000
 
+/* Allow up to this number of message infos in a folder with message headers
+   stored in memory, to not use too much memory when fetching new messages. */
+#define MAX_N_MESSAGES_WITH_HEADERS 500
+
 /* Ping the server after a period of inactivity to avoid being logged off.
  * Using a 29 minute inactivity timeout as recommended in RFC 2177 (IDLE). */
 #define INACTIVITY_TIMEOUT_SECONDS (29 * 60)
@@ -251,6 +255,7 @@ struct _CamelIMAPXServerPrivate {
 	GWeakRef select_mailbox;
 	GWeakRef select_pending;
 	gint last_selected_mailbox_change_stamp;
+	gboolean select_mailbox_closed; /* set to TRUE after "OK [CLOSED]" during SELECT command */
 
 	GMutex changes_lock;
 	CamelFolderChangeInfo *changes;
@@ -310,6 +315,7 @@ struct _CamelIMAPXServerPrivate {
 	CamelFolder *fetch_changes_folder; /* not referenced */
 	GHashTable *fetch_changes_infos; /* gchar *uid ~> FetchChangesInfo-s */
 	gint64 fetch_changes_last_progress; /* when was called last progress */
+	gboolean fetch_changes_with_headers; /* whether can preserve message headers in the message info */
 
 	struct _status_info *copyuid_status;
 
@@ -1160,6 +1166,7 @@ imapx_untagged_fetch (CamelIMAPXServer *is,
 	if ((finfo->got & FETCH_FLAGS) && !(finfo->got & FETCH_HEADER)) {
 		CamelIMAPXMailbox *select_mailbox;
 		CamelIMAPXMailbox *select_pending;
+		gboolean select_mailbox_closed;
 
 		if (is->priv->fetch_changes_mailbox) {
 			if (!is->priv->fetch_changes_mailbox ||
@@ -1176,6 +1183,7 @@ imapx_untagged_fetch (CamelIMAPXServer *is,
 		g_mutex_lock (&is->priv->select_lock);
 		select_mailbox = g_weak_ref_get (&is->priv->select_mailbox);
 		select_pending = g_weak_ref_get (&is->priv->select_pending);
+		select_mailbox_closed = is->priv->select_mailbox_closed;
 		g_mutex_unlock (&is->priv->select_lock);
 
 		/* This is either a refresh_info job, check to see if it is
@@ -1184,7 +1192,7 @@ imapx_untagged_fetch (CamelIMAPXServer *is,
 		if ((finfo->got & FETCH_UID) != 0 && is->priv->fetch_changes_folder && is->priv->fetch_changes_infos) {
 			FetchChangesInfo *nfo;
 			gint64 monotonic_time;
-			gint n_messages;
+			guint32 n_messages;
 
 			nfo = g_hash_table_lookup (is->priv->fetch_changes_infos, finfo->uid);
 			if (!nfo) {
@@ -1205,15 +1213,10 @@ imapx_untagged_fetch (CamelIMAPXServer *is,
 				COMMAND_LOCK (is);
 
 				if (is->priv->current_command) {
-					guint32 n_messages;
-
 					COMMAND_UNLOCK (is);
 
 					is->priv->fetch_changes_last_progress = monotonic_time;
-
-					n_messages = camel_imapx_mailbox_get_messages (is->priv->fetch_changes_mailbox);
-					if (n_messages > 0)
-						camel_operation_progress (cancellable, 100 * is->priv->context->id / n_messages);
+					camel_operation_progress (cancellable, 100 * is->priv->context->id / n_messages);
 				} else {
 					COMMAND_UNLOCK (is);
 				}
@@ -1226,7 +1229,7 @@ imapx_untagged_fetch (CamelIMAPXServer *is,
 
 			c (is->priv->tagprefix, "flag changed: %lu\n", is->priv->context->id);
 
-			if (select_pending)
+			if (select_mailbox_closed && select_pending)
 				select_folder = imapx_server_ref_folder (is, select_pending);
 			else
 				select_folder = imapx_server_ref_folder (is, select_mailbox);
@@ -1258,8 +1261,7 @@ imapx_untagged_fetch (CamelIMAPXServer *is,
 						mi, finfo->flags,
 						finfo->user_flags,
 						camel_imapx_mailbox_get_permanentflags (select_mailbox),
-						select_folder,
-						(select_pending == NULL));
+						select_folder);
 					c (is->priv->tagprefix, "found uid %s in '%s', changed:%d\n", uid,
 						camel_folder_get_full_name (select_folder), changed);
 				} else {
@@ -1423,6 +1425,9 @@ imapx_untagged_fetch (CamelIMAPXServer *is,
 					c (is->priv->tagprefix, "Not updating unseen count for new message %s\n", finfo->uid);
 				}
 			}
+
+			if (is->priv->fetch_changes_infos && !is->priv->fetch_changes_with_headers)
+				camel_message_info_take_headers (mi, NULL);
 
 			camel_message_info_set_size (mi, finfo->size);
 			camel_message_info_set_abort_notifications (mi, FALSE);
@@ -2027,11 +2032,14 @@ imapx_untagged_ok_no_bad (CamelIMAPXServer *is,
 
 			if (select_mailbox == NULL) {
 				g_weak_ref_set (&is->priv->select_mailbox, select_pending);
+				is->priv->select_mailbox_closed = FALSE;
 
 				if (select_pending)
 					is->priv->last_selected_mailbox_change_stamp = camel_imapx_mailbox_get_change_stamp (select_pending);
 				else
 					is->priv->last_selected_mailbox_change_stamp = 0;
+			} else {
+				is->priv->select_mailbox_closed = TRUE;
 			}
 
 			g_mutex_unlock (&is->priv->select_lock);
@@ -2263,7 +2271,7 @@ imapx_continuation (CamelIMAPXServer *is,
 	gboolean success;
 
 	/* The 'literal' pointer is like a write-lock, nothing else
-	 * can write while we have it ... so we dont need any
+	 * can write while we have it ... so we don't need any
 	 * ohter lock here.  All other writes go through
 	 * queue-lock */
 	if (camel_imapx_server_is_in_idle (is)) {
@@ -2678,7 +2686,7 @@ imapx_server_set_streams (CamelIMAPXServer *is,
 		GInputStream *temp_stream;
 
 		/* The logger produces debugging output. */
-		logger = camel_imapx_logger_new (is->priv->tagprefix);
+		logger = camel_imapx_logger_new (is->priv->tagprefix, NULL);
 		input_stream = g_converter_input_stream_new (
 			input_stream, logger);
 		g_clear_object (&logger);
@@ -2695,7 +2703,7 @@ imapx_server_set_streams (CamelIMAPXServer *is,
 
 	if (output_stream != NULL) {
 		/* The logger produces debugging output. */
-		logger = camel_imapx_logger_new (is->priv->tagprefix);
+		logger = camel_imapx_logger_new (is->priv->tagprefix, is);
 		output_stream = g_converter_output_stream_new (
 			output_stream, logger);
 		g_clear_object (&logger);
@@ -3203,6 +3211,7 @@ camel_imapx_server_authenticate_sync (CamelIMAPXServer *is,
 	gchar *host;
 	gchar *user;
 	gboolean can_retry_login = FALSE;
+	gboolean send_client_id;
 	gboolean success;
 
 	g_return_val_if_fail (
@@ -3217,6 +3226,8 @@ camel_imapx_server_authenticate_sync (CamelIMAPXServer *is,
 	network_settings = CAMEL_NETWORK_SETTINGS (settings);
 	host = camel_network_settings_dup_host (network_settings);
 	user = camel_network_settings_dup_user (network_settings);
+
+	send_client_id = camel_imapx_settings_get_send_client_id (CAMEL_IMAPX_SETTINGS (settings));
 
 	g_object_unref (settings);
 
@@ -3293,8 +3304,6 @@ camel_imapx_server_authenticate_sync (CamelIMAPXServer *is,
 		const gchar *password;
 		gchar *password_latin1;
 
-		can_retry_login = -1;
-
 		password = camel_service_get_password (service);
 		password_latin1 = g_convert_with_fallback (password, -1, "ISO-8859-1", "UTF-8", "", NULL, NULL, NULL);
 
@@ -3370,6 +3379,14 @@ camel_imapx_server_authenticate_sync (CamelIMAPXServer *is,
 		}
 
 		g_mutex_unlock (&is->priv->stream_lock);
+
+		if (send_client_id) {
+			camel_imapx_command_unref (ic);
+
+			ic = camel_imapx_command_new (is, CAMEL_IMAPX_JOB_ID, "ID (\"name\" \"" PACKAGE "\" \"version\" \"" VERSION "\")");
+			if (!camel_imapx_server_process_command_sync (is, ic, _("Failed to issue ID"), cancellable, error))
+				result = CAMEL_AUTHENTICATION_ERROR;
+		}
 	}
 
 	camel_imapx_command_unref (ic);
@@ -3844,7 +3861,7 @@ camel_imapx_server_ref_settings (CamelIMAPXServer *server)
  * The returned #GInputStream is referenced for thread-safety and must
  * be unreferenced with g_object_unref() when finished with it.
  *
- * Returns: a #GInputStream, or %NULL
+ * Returns: (nullable): a #GInputStream, or %NULL
  *
  * Since: 3.12
  **/
@@ -3876,7 +3893,7 @@ camel_imapx_server_ref_input_stream (CamelIMAPXServer *is)
  * The returned #GOutputStream is referenced for thread-safety and must
  * be unreferenced with g_object_unref() when finished with it.
  *
- * Returns: a #GOutputStream, or %NULL
+ * Returns: (nullable): a #GOutputStream, or %NULL
  *
  * Since: 3.12
  **/
@@ -3909,7 +3926,7 @@ camel_imapx_server_ref_output_stream (CamelIMAPXServer *is)
  * The returned #CamelIMAPXMailbox is reference for thread-safety and
  * should be unreferenced with g_object_unref() when finished with it.
  *
- * Returns: a #CamelIMAPXMailbox, or %NULL
+ * Returns: (nullable): a #CamelIMAPXMailbox, or %NULL
  *
  * Since: 3.12
  **/
@@ -3963,7 +3980,7 @@ camel_imapx_server_mailbox_selected (CamelIMAPXServer *is,
 
 	g_mutex_lock (&is->priv->select_lock);
 	selected_mailbox = g_weak_ref_get (&is->priv->select_mailbox);
-	res = selected_mailbox == mailbox;
+	res = selected_mailbox == mailbox && !is->priv->select_mailbox_closed;
 	g_clear_object (&selected_mailbox);
 	g_mutex_unlock (&is->priv->select_lock);
 
@@ -3988,7 +4005,7 @@ camel_imapx_server_ensure_selected_sync (CamelIMAPXServer *is,
 
 	g_mutex_lock (&is->priv->select_lock);
 	selected_mailbox = g_weak_ref_get (&is->priv->select_mailbox);
-	if (selected_mailbox == mailbox) {
+	if (selected_mailbox == mailbox && !is->priv->select_mailbox_closed) {
 		gboolean request_noop;
 		gint change_stamp;
 
@@ -4023,6 +4040,7 @@ camel_imapx_server_ensure_selected_sync (CamelIMAPXServer *is,
 	}
 
 	g_weak_ref_set (&is->priv->select_pending, mailbox);
+	is->priv->select_mailbox_closed = FALSE;
 	g_mutex_unlock (&is->priv->select_lock);
 
 	success = camel_imapx_server_process_command_sync (is, ic, _("Failed to select mailbox"), cancellable, error);
@@ -4032,6 +4050,7 @@ camel_imapx_server_ensure_selected_sync (CamelIMAPXServer *is,
 	g_mutex_lock (&is->priv->select_lock);
 
 	g_weak_ref_set (&is->priv->select_pending, NULL);
+	is->priv->select_mailbox_closed = FALSE;
 
 	if (success) {
 		is->priv->state = IMAPX_SELECTED;
@@ -4255,6 +4274,7 @@ imapx_disconnect (CamelIMAPXServer *is)
 
 	g_mutex_lock (&is->priv->select_lock);
 	is->priv->last_selected_mailbox_change_stamp = 0;
+	is->priv->select_mailbox_closed = FALSE;
 	g_weak_ref_set (&is->priv->select_mailbox, NULL);
 	g_weak_ref_set (&is->priv->select_pending, NULL);
 	g_mutex_unlock (&is->priv->select_lock);
@@ -5355,7 +5375,7 @@ imapx_server_process_fetch_changes_infos (CamelIMAPXServer *is,
 			nfo->server_flags,
 			nfo->server_user_flags,
 			camel_imapx_mailbox_get_permanentflags (mailbox),
-			folder, FALSE)) {
+			folder)) {
 			g_mutex_lock (&is->priv->changes_lock);
 			camel_folder_change_info_change_uid (is->priv->changes, camel_message_info_get_uid (minfo));
 			g_mutex_unlock (&is->priv->changes_lock);
@@ -5363,6 +5383,20 @@ imapx_server_process_fetch_changes_infos (CamelIMAPXServer *is,
 
 		g_clear_object (&minfo);
 	}
+}
+
+/* One would use `g_slist_length()`, but the actual length is not needed here,
+   thus this is quicker for large lists, due to not traversing all the items. */
+static gboolean
+imapx_server_slist_length_not_more_than (GSList *list,
+					 guint n_items)
+{
+	while (list && n_items) {
+		list = g_slist_next (list);
+		n_items--;
+	}
+
+	return !list;
 }
 
 static gboolean
@@ -5404,6 +5438,7 @@ imapx_server_fetch_changes (CamelIMAPXServer *is,
 	is->priv->fetch_changes_folder = folder;
 	is->priv->fetch_changes_infos = infos;
 	is->priv->fetch_changes_last_progress = 0;
+	is->priv->fetch_changes_with_headers = TRUE;
 
 	camel_operation_push_message (cancellable,
 		/* Translators: The first “%s” is replaced with an account name and the second “%s”
@@ -5411,7 +5446,7 @@ imapx_server_fetch_changes (CamelIMAPXServer *is,
 		   the whole “%s : %s” is meant as an absolute identification of the folder. */
 		_("Scanning for changed messages in “%s : %s”"),
 		camel_service_get_display_name (CAMEL_SERVICE (camel_folder_get_parent_store (folder))),
-		camel_folder_get_full_name (folder));
+		camel_folder_get_full_display_name (folder));
 
 	success = camel_imapx_server_process_command_sync (is, ic, _("Error scanning changes"), cancellable, error);
 
@@ -5424,6 +5459,8 @@ imapx_server_fetch_changes (CamelIMAPXServer *is,
 	g_hash_table_remove_all (infos);
 
 	if (success && fetch_summary_uids) {
+		CamelIMAPXStore *imapx_store;
+		gboolean bodystructure_enabled;
 		struct _uidset_state uidset;
 		GSList *link;
 
@@ -5436,7 +5473,11 @@ imapx_server_fetch_changes (CamelIMAPXServer *is,
 			   the whole “%s : %s” is meant as an absolute identification of the folder. */
 			_("Fetching summary information for new messages in “%s : %s”"),
 			camel_service_get_display_name (CAMEL_SERVICE (camel_folder_get_parent_store (folder))),
-			camel_folder_get_full_name (folder));
+			camel_folder_get_full_display_name (folder));
+
+		imapx_store = camel_imapx_server_ref_store (is);
+		bodystructure_enabled = imapx_store && camel_imapx_store_get_bodystructure_enabled (imapx_store);
+		is->priv->fetch_changes_with_headers = imapx_server_slist_length_not_more_than (fetch_summary_uids, MAX_N_MESSAGES_WITH_HEADERS);
 
 		fetch_summary_uids = g_slist_sort (fetch_summary_uids, imapx_uids_desc_cmp);
 
@@ -5451,11 +5492,6 @@ imapx_server_fetch_changes (CamelIMAPXServer *is,
 
 			if (imapx_uidset_add (&uidset, ic, uid) == 1 || (!link->next && ic && imapx_uidset_done (&uidset, ic))) {
 				GError *local_error = NULL;
-				gboolean bodystructure_enabled;
-				CamelIMAPXStore *imapx_store;
-
-				imapx_store = camel_imapx_server_ref_store (is);
-				bodystructure_enabled = imapx_store && camel_imapx_store_get_bodystructure_enabled (imapx_store);
 
 				if (bodystructure_enabled)
 					camel_imapx_command_add (ic, " (RFC822.SIZE RFC822.HEADER BODYSTRUCTURE FLAGS)");
@@ -5471,12 +5507,11 @@ imapx_server_fetch_changes (CamelIMAPXServer *is,
 				   even when it's not 100% sure the BODYSTRUCTURE response was the broken one. */
 				if (bodystructure_enabled && !success &&
 				    g_error_matches (local_error, CAMEL_IMAPX_ERROR, CAMEL_IMAPX_ERROR_SERVER_RESPONSE_MALFORMED)) {
+					bodystructure_enabled = FALSE;
 					camel_imapx_store_set_bodystructure_enabled (imapx_store, FALSE);
 					local_error->domain = CAMEL_IMAPX_SERVER_ERROR;
 					local_error->code = CAMEL_IMAPX_SERVER_ERROR_TRY_RECONNECT;
 				}
-
-				g_clear_object (&imapx_store);
 
 				if (local_error)
 					g_propagate_error (error, local_error);
@@ -5488,6 +5523,8 @@ imapx_server_fetch_changes (CamelIMAPXServer *is,
 				g_hash_table_remove_all (infos);
 			}
 		}
+
+		g_clear_object (&imapx_store);
 
 		camel_operation_pop_message (cancellable);
 
@@ -5527,13 +5564,36 @@ imapx_server_fetch_changes (CamelIMAPXServer *is,
 	return success;
 }
 
+/* It does not verify single-client-mode, it only checks whether it's time
+   to do a full update according to folder's last-full-update property and
+   return TRUE, when the full update should be done. It also stores the current
+   time when returning TRUE. */
 static gboolean
-camel_imapx_server_skip_old_flags_update (CamelStore *store)
+camel_imapx_server_check_folder_last_full_update (CamelFolder *folder)
 {
+	gint64 now = g_get_real_time () / G_USEC_PER_SEC;
+	gint64 diff = now - camel_imapx_folder_get_last_full_update (CAMEL_IMAPX_FOLDER (folder));
+
+	if (diff > 0 && diff < 24 * 60 * 60)
+		return FALSE;
+
+	camel_imapx_folder_set_last_full_update (CAMEL_IMAPX_FOLDER (folder), now);
+	camel_object_state_write (CAMEL_OBJECT (folder));
+
+	return TRUE;
+}
+
+static gboolean
+camel_imapx_server_do_old_flags_update (CamelFolder *folder)
+{
+	CamelStore *store;
 	CamelSession *session;
 	CamelSettings *settings;
 	GNetworkMonitor *network_monitor;
-	gboolean skip_old_flags_update = FALSE;
+	gboolean do_old_flags_update = TRUE;
+	gboolean single_client_mode = FALSE;
+
+	store = camel_folder_get_parent_store (folder);
 
 	if (!CAMEL_IS_STORE (store))
 		return FALSE;
@@ -5543,34 +5603,50 @@ camel_imapx_server_skip_old_flags_update (CamelStore *store)
 		gboolean allow_update;
 
 		allow_update = camel_imapx_settings_get_full_update_on_metered_network (CAMEL_IMAPX_SETTINGS (settings));
+		single_client_mode = camel_imapx_settings_get_single_client_mode (CAMEL_IMAPX_SETTINGS (settings));
 
 		g_object_unref (settings);
 
-		if (allow_update)
-			return FALSE;
+		if (allow_update) {
+			if (single_client_mode)
+				do_old_flags_update = camel_imapx_server_check_folder_last_full_update (folder);
+
+			return do_old_flags_update;
+		}
 	}
 
 	session = camel_service_ref_session (CAMEL_SERVICE (store));
 	if (!session)
-		return skip_old_flags_update;
+		return do_old_flags_update;
 
 	network_monitor = camel_session_ref_network_monitor (session);
 
-	skip_old_flags_update = network_monitor && g_network_monitor_get_network_metered (network_monitor);
+	do_old_flags_update = !network_monitor || !g_network_monitor_get_network_metered (network_monitor);
 
 #ifdef HAVE_GPOWERPROFILEMONITOR
-	if (!skip_old_flags_update) {
-		GPowerProfileMonitor *power_monitor;
+	if (do_old_flags_update) {
+		GSettings *eds_settings;
 
-		power_monitor = g_power_profile_monitor_dup_default ();
-		skip_old_flags_update = power_monitor && g_power_profile_monitor_get_power_saver_enabled (power_monitor);
-		g_clear_object (&power_monitor);
+		eds_settings = g_settings_new ("org.gnome.evolution-data-server");
+
+		if (g_settings_get_boolean (eds_settings, "limit-operations-in-power-saver-mode")) {
+			GPowerProfileMonitor *power_monitor;
+
+			power_monitor = g_power_profile_monitor_dup_default ();
+			do_old_flags_update = !power_monitor || !g_power_profile_monitor_get_power_saver_enabled (power_monitor);
+			g_clear_object (&power_monitor);
+		}
+
+		g_clear_object (&eds_settings);
 	}
 #endif
 	g_clear_object (&network_monitor);
 	g_clear_object (&session);
 
-	return skip_old_flags_update;
+	if (single_client_mode && do_old_flags_update)
+		do_old_flags_update = camel_imapx_server_check_folder_last_full_update (folder);
+
+	return do_old_flags_update;
 }
 
 gboolean
@@ -5585,6 +5661,7 @@ camel_imapx_server_refresh_info_sync (CamelIMAPXServer *is,
 	CamelFolder *folder;
 	CamelFolderChangeInfo *changes;
 	GHashTable *known_uids;
+	GPtrArray *summary_uids = NULL;
 	guint32 messages;
 	guint32 unseen;
 	guint32 uidnext;
@@ -5592,7 +5669,8 @@ camel_imapx_server_refresh_info_sync (CamelIMAPXServer *is,
 	guint64 highestmodseq;
 	guint32 total;
 	guint64 uidl;
-	gboolean need_rescan, skip_old_flags_update;
+	gboolean need_rescan, do_old_flags_update;
+	gboolean uidvalidity_changed;
 	gboolean success;
 
 	g_return_val_if_fail (CAMEL_IS_IMAPX_SERVER (is), FALSE);
@@ -5605,6 +5683,15 @@ camel_imapx_server_refresh_info_sync (CamelIMAPXServer *is,
 		ic = camel_imapx_command_new (is, CAMEL_IMAPX_JOB_STATUS, "STATUS %M (%t)", mailbox, is->priv->status_data_items);
 
 		success = camel_imapx_server_process_command_sync (is, ic, _("Error running STATUS"), cancellable, error);
+
+		/* Ignore permission errors from possibly write-only mailboxes */
+		if (!success && ic->status && ic->status->result == IMAPX_NO && ic->status->text &&
+		    camel_strstrcase (ic->status->text, "Permission denied")) {
+			camel_imapx_command_unref (ic);
+			g_clear_object (&selected_mailbox);
+			g_clear_error (error);
+			return TRUE;
+		}
 
 		camel_imapx_command_unref (ic);
 	}
@@ -5625,8 +5712,9 @@ camel_imapx_server_refresh_info_sync (CamelIMAPXServer *is,
 	highestmodseq = camel_imapx_mailbox_get_highestmodseq (mailbox);
 	total = camel_folder_summary_count (CAMEL_FOLDER_SUMMARY (imapx_summary));
 
+	uidvalidity_changed = uidvalidity > 0 && imapx_summary->validity > 0 && uidvalidity != imapx_summary->validity;
 	need_rescan =
-		(uidvalidity > 0 && uidvalidity != imapx_summary->validity) ||
+		uidvalidity_changed || !imapx_summary->validity ||
 		total != messages ||
 		imapx_summary->uidnext != uidnext ||
 		camel_folder_summary_get_unread_count (CAMEL_FOLDER_SUMMARY (imapx_summary)) != unseen ||
@@ -5642,7 +5730,15 @@ camel_imapx_server_refresh_info_sync (CamelIMAPXServer *is,
 		return FALSE;
 	}
 
-	if (is->priv->use_qresync && imapx_summary->modseq > 0 && uidvalidity > 0) {
+	if (uidvalidity_changed) {
+		c (
+			is->priv->tagprefix,
+			"UIDVALIDITY changed %" G_GUINT64_FORMAT "~>%u, drop all cached messages and start from scratch in folder:'%s'\n",
+			imapx_summary->validity, uidvalidity,
+			camel_folder_get_full_name (folder));
+		camel_imapx_folder_invalidate_local_cache (CAMEL_IMAPX_FOLDER (folder), uidvalidity);
+		total = 0;
+	} else if (is->priv->use_qresync && imapx_summary->modseq > 0 && uidvalidity > 0) {
 		if (total != messages ||
 		    camel_folder_summary_get_unread_count (CAMEL_FOLDER_SUMMARY (imapx_summary)) != unseen ||
 		    imapx_summary->modseq != highestmodseq) {
@@ -5700,10 +5796,18 @@ camel_imapx_server_refresh_info_sync (CamelIMAPXServer *is,
 
 	known_uids = g_hash_table_new_full (g_str_hash, g_str_equal, (GDestroyNotify) camel_pstring_free, NULL);
 
-	skip_old_flags_update = camel_imapx_server_skip_old_flags_update (camel_folder_get_parent_store (folder));
+	do_old_flags_update = camel_imapx_server_do_old_flags_update (folder);
+
+	if (do_old_flags_update) {
+		/* Remember summary state before running the update, in case there are
+		   added new messages into the folder meanwhile, like with a COPY/MOVE filter;
+		   such new messages would be considered removed, because not being part
+		   of the 'known_uids' hash table. */
+		summary_uids = camel_folder_summary_get_array (CAMEL_FOLDER_SUMMARY (imapx_summary));
+	}
 
 	success = imapx_server_fetch_changes (is, mailbox, folder, known_uids, uidl, 0, cancellable, error);
-	if (success && uidl != 1 && !skip_old_flags_update)
+	if (success && uidl != 1 && do_old_flags_update)
 		success = imapx_server_fetch_changes (is, mailbox, folder, known_uids, 0, uidl, cancellable, error);
 
 	if (success) {
@@ -5720,16 +5824,14 @@ camel_imapx_server_refresh_info_sync (CamelIMAPXServer *is,
 
 	g_mutex_unlock (&is->priv->changes_lock);
 
-	if (success && !skip_old_flags_update) {
+	if (success && do_old_flags_update) {
 		GList *removed = NULL;
-		GPtrArray *array;
 		gint ii;
 
 		camel_folder_summary_lock (CAMEL_FOLDER_SUMMARY (imapx_summary));
 
-		array = camel_folder_summary_get_array (CAMEL_FOLDER_SUMMARY (imapx_summary));
-		for (ii = 0; array && ii < array->len; ii++) {
-			const gchar *uid = array->pdata[ii];
+		for (ii = 0; summary_uids && ii < summary_uids->len; ii++) {
+			const gchar *uid = summary_uids->pdata[ii];
 
 			if (!uid)
 				continue;
@@ -5749,9 +5851,9 @@ camel_imapx_server_refresh_info_sync (CamelIMAPXServer *is,
 			/* Shares UIDs with the 'array'. */
 			g_list_free (removed);
 		}
-
-		camel_folder_summary_free_array (array);
 	}
+
+	g_clear_pointer (&summary_uids, camel_folder_summary_free_array);
 
 	camel_folder_summary_save (CAMEL_FOLDER_SUMMARY (imapx_summary), NULL);
 	imapx_update_store_summary (folder);
@@ -6295,11 +6397,30 @@ camel_imapx_server_sync_changes_sync (CamelIMAPXServer *is,
 
 					if (imapx_uidset_add (&uidset, ic, camel_message_info_get_uid (info)) == 1
 					    || (i == c->infos->len - 1 && imapx_uidset_done (&uidset, ic))) {
+						const gchar *renamed;
 						gchar *utf7;
+						gboolean did_add;
  store_changes:
-						utf7 = camel_utf8_utf7 (c->name);
+						did_add = FALSE;
+						renamed = imapx_rename_label_flag (c->name, FALSE);
+						utf7 = camel_utf8_utf7 (renamed);
 
-						camel_imapx_command_add (ic, " %tFLAGS.SILENT (%t)", on ? "+" : "-", utf7 ? utf7 : c->name);
+						if (!on) {
+							/* For backward compatibility, where the old code could
+							   write the original (used in evo) name to the server */
+							if (g_ascii_strcasecmp (renamed, c->name) != 0) {
+								gchar *orig_utf7;
+
+								orig_utf7 = camel_utf8_utf7 (c->name);
+								camel_imapx_command_add (ic, " -FLAGS.SILENT (%t %t)", utf7 ? utf7 : renamed, orig_utf7 ? orig_utf7 : c->name);
+								g_free (orig_utf7);
+
+								did_add = TRUE;
+							}
+						}
+
+						if (!did_add)
+							camel_imapx_command_add (ic, " %tFLAGS.SILENT (%t)", on ? "+" : "-", utf7 ? utf7 : renamed);
 
 						g_free (utf7);
 
@@ -6872,7 +6993,7 @@ camel_imapx_server_uid_search_sync (CamelIMAPXServer *is,
 	if (search_key && words) {
 		gboolean is_gmail_server = FALSE;
 
-		if (g_strcasecmp (search_key, "BODY") == 0) {
+		if (g_ascii_strcasecmp (search_key, "BODY") == 0) {
 			CamelIMAPXStore *imapx_store;
 
 			imapx_store = camel_imapx_server_ref_store (is);
@@ -7364,7 +7485,7 @@ camel_imapx_server_stop_idle_sync (CamelIMAPXServer *is,
  *                     untagged response code. Must be
  *                     all-uppercase with underscores allowed
  *                     (see RFC 3501)
- * @desc: a #CamelIMAPXUntaggedRespHandlerDesc handler description
+ * @desc: (nullable): a #CamelIMAPXUntaggedRespHandlerDesc handler description
  *        structure. The descriptor structure is expected to
  *        remain stable over the lifetime of the #CamelIMAPXServer
  *        instance it was registered with. It is the responsibility
@@ -7378,7 +7499,7 @@ camel_imapx_server_stop_idle_sync (CamelIMAPXServer *is,
  * code is implemented with just some new code to be run before
  * or after the original handler code
  *
- * Returns: the #CamelIMAPXUntaggedRespHandlerDesc previously
+ * Returns: (nullable): the #CamelIMAPXUntaggedRespHandlerDesc previously
  *          registered for this untagged response, if any,
  *          NULL otherwise.
  *
@@ -7483,4 +7604,28 @@ camel_imapx_server_ref_current_command (CamelIMAPXServer *is)
 	COMMAND_UNLOCK (is);
 
 	return command;
+}
+
+gboolean
+camel_imapx_server_should_discard_logging (CamelIMAPXServer *is,
+					   const gchar **out_replace_text)
+{
+	gboolean discard = FALSE;
+
+	g_return_val_if_fail (CAMEL_IS_IMAPX_SERVER (is), FALSE);
+	g_return_val_if_fail (out_replace_text != NULL, FALSE);
+
+	COMMAND_LOCK (is);
+
+	if (imapx_server_has_current_command (is, CAMEL_IMAPX_JOB_AUTHENTICATE)) {
+		discard = TRUE;
+		*out_replace_text = "AUTHENTICATE";
+	} else if (imapx_server_has_current_command (is, CAMEL_IMAPX_JOB_LOGIN)) {
+		discard = TRUE;
+		*out_replace_text = "LOGIN";
+	}
+
+	COMMAND_UNLOCK (is);
+
+	return discard;
 }

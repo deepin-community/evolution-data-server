@@ -281,6 +281,16 @@ nss_error_to_string (glong errorcode)
 	cs (SEC_ERROR_PKCS11_FUNCTION_FAILED, "A PKCS #11 module returned CKR_FUNCTION_FAILED, indicating that the requested function could not be performed.  Trying the same operation again might succeed.")
 	cs (SEC_ERROR_PKCS11_DEVICE_ERROR, "A PKCS #11 module returned CKR_DEVICE_ERROR, indicating that a problem has occurred with the token or slot.")
 	#endif
+
+	#if defined (NSS_VMAJOR) && defined (NSS_VMINOR) && (NSS_VMAJOR > 3 || (NSS_VMAJOR == 3 && NSS_VMINOR >= 89))
+	cs (SEC_ERROR_EXPIRED_PASSWORD, "Expired password")
+	cs (SEC_ERROR_LOCKED_PASSWORD, "Locked password")
+	cs (SEC_ERROR_UNKNOWN_PKCS11_ERROR, "Unknown PKCS11 error")
+	cs (SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED, "Certificate signature algorithm disabled")
+	cs (SEC_ERROR_LEGACY_DATABASE, "Legacy database")
+	cs (SEC_ERROR_SIGNATURE_ALGORITHM_DISABLED, "Signature algorithm disabled")
+	cs (SEC_ERROR_ALGORITHM_MISMATCH, "Algorithm mismatch")
+	#endif
 	}
 
 	#undef cs
@@ -490,10 +500,13 @@ fail:
 }
 
 static const gchar *
-sm_status_description (NSSCMSVerificationStatus status)
+sm_status_description (NSSCMSVerificationStatus status,
+		       CamelCipherValiditySign *out_sign_status)
 {
 	/* could use this but then we can't control i18n? */
 	/*NSS_CMSUtil_VerificationStatusToString (status));*/
+
+	*out_sign_status = CAMEL_CIPHER_VALIDITY_SIGN_BAD;
 
 	switch (status) {
 	case NSSCMSVS_Unverified:
@@ -501,14 +514,17 @@ sm_status_description (NSSCMSVerificationStatus status)
 		/* Translators: A fallback message when couldn't verify an SMIME signature */
 		return _("Unverified");
 	case NSSCMSVS_GoodSignature:
+		*out_sign_status = CAMEL_CIPHER_VALIDITY_SIGN_GOOD;
 		return _("Good signature");
 	case NSSCMSVS_BadSignature:
 		return _("Bad signature");
 	case NSSCMSVS_DigestMismatch:
 		return _("Content tampered with or altered in transit");
 	case NSSCMSVS_SigningCertNotFound:
+		*out_sign_status = CAMEL_CIPHER_VALIDITY_SIGN_NEED_PUBLIC_KEY;
 		return _("Signing certificate not found");
 	case NSSCMSVS_SigningCertNotTrusted:
+		*out_sign_status = CAMEL_CIPHER_VALIDITY_SIGN_UNKNOWN;
 		return _("Signing certificate not trusted");
 	case NSSCMSVS_SignatureAlgorithmUnknown:
 		return _("Signature algorithm unknown");
@@ -519,6 +535,125 @@ sm_status_description (NSSCMSVerificationStatus status)
 	case NSSCMSVS_ProcessingError:
 		return _("Processing error");
 	}
+}
+
+/* Below camel_smime_NSS_...() functions are copy&pasted from NSS,
+   because they are available in the header files, but not exported
+   in the libraries... */
+static SECOidTag
+camel_smime_NSS_CMSUtil_MapSignAlgs (SECOidTag signAlg)
+{
+	switch (signAlg) {
+	case SEC_OID_PKCS1_MD2_WITH_RSA_ENCRYPTION:
+		return SEC_OID_MD2;
+	case SEC_OID_PKCS1_MD5_WITH_RSA_ENCRYPTION:
+		return SEC_OID_MD5;
+	case SEC_OID_PKCS1_SHA1_WITH_RSA_ENCRYPTION:
+	case SEC_OID_ANSIX962_ECDSA_SHA1_SIGNATURE:
+	case SEC_OID_ANSIX9_DSA_SIGNATURE_WITH_SHA1_DIGEST:
+		return SEC_OID_SHA1;
+	case SEC_OID_PKCS1_SHA256_WITH_RSA_ENCRYPTION:
+	case SEC_OID_ANSIX962_ECDSA_SHA256_SIGNATURE:
+		return SEC_OID_SHA256;
+        case SEC_OID_PKCS1_SHA384_WITH_RSA_ENCRYPTION:
+        case SEC_OID_ANSIX962_ECDSA_SHA384_SIGNATURE:
+		return SEC_OID_SHA384;
+	case SEC_OID_PKCS1_SHA512_WITH_RSA_ENCRYPTION:
+	case SEC_OID_ANSIX962_ECDSA_SHA512_SIGNATURE:
+		return SEC_OID_SHA512;
+	default:
+		break;
+	}
+	/* not one of the algtags incorrectly sent to us*/
+	return signAlg;
+}
+
+static SECOidData *
+camel_smime_NSS_CMSSignerInfo_GetDigestAlg (NSSCMSSignerInfo *signerinfo)
+{
+	SECOidData *algdata;
+	SECOidTag algtag;
+
+	algdata = SECOID_FindOID (&(signerinfo->digestAlg.algorithm));
+	if (algdata == NULL) {
+		return algdata;
+	}
+	/* Windows may have given us a signer algorithm oid instead of a digest
+	 * algorithm oid. This call will map to a signer oid to a digest one,
+	 * otherwise it leaves the oid alone and let the chips fall as they may
+	 * if it's not a digest oid.
+	 */
+	algtag = camel_smime_NSS_CMSUtil_MapSignAlgs (algdata->offset);
+	if (algtag != algdata->offset) {
+		/* if the tags don't match, then we must have received a signer
+		 * algorithID. Now we need to get the oid data for the digest
+		 * oid, which the rest of the code is expecting */
+		algdata = SECOID_FindOIDByTag (algtag);
+	}
+
+	return algdata;
+}
+
+static gint
+camel_smime_NSS_CMSAlgArray_GetIndexByAlgTag (SECAlgorithmID **algorithmArray,
+					      SECOidTag algtag)
+{
+	SECOidData *algid;
+	int i = -1;
+
+	if (algorithmArray == NULL || algorithmArray[0] == NULL)
+		return i;
+
+	algid = SECOID_FindOIDByTag (algtag);
+	if (!algid)
+		return i;
+	for (i = 0; algorithmArray[i] != NULL; i++) {
+		if (SECITEM_ItemsAreEqual (&algorithmArray[i]->algorithm, &algid->oid))
+			break; /* bingo */
+		}
+
+	if (algorithmArray[i] == NULL)
+		return -1; /* not found */
+
+	return i;
+}
+
+static SECItem *
+camel_smime_NSS_CMSSignedData_GetDigestValue (NSSCMSSignedData *sigd, SECOidTag digestalgtag)
+{
+	int n;
+
+	if (!sigd) {
+		PORT_SetError(SEC_ERROR_INVALID_ARGS);
+		return NULL;
+	}
+
+	if (sigd->digestAlgorithms == NULL || sigd->digests == NULL) {
+		PORT_SetError(SEC_ERROR_DIGEST_NOT_FOUND);
+		return NULL;
+	}
+
+	n = camel_smime_NSS_CMSAlgArray_GetIndexByAlgTag (sigd->digestAlgorithms, digestalgtag);
+
+	return (n < 0) ? NULL : sigd->digests[n];
+}
+
+static SECItem *
+camel_smime_NSS_CMSContentInfo_GetContentTypeOID (NSSCMSContentInfo *cinfo)
+{
+	if (cinfo == NULL) {
+		return NULL;
+	}
+
+	if (cinfo->contentTypeTag == NULL) {
+		cinfo->contentTypeTag = SECOID_FindOID (&(cinfo->contentType));
+	}
+
+	if (cinfo->contentTypeTag == NULL) {
+		return NULL;
+	}
+
+	return &(cinfo->contentTypeTag->oid);
 }
 
 static CamelCipherValidity *
@@ -541,12 +676,12 @@ sm_verify_cmsg (CamelCipherContext *context,
 	PLArenaPool *poolp = NULL;
 	CamelStream *mem;
 	NSSCMSVerificationStatus status;
+	CamelCipherValiditySign sign_status = CAMEL_CIPHER_VALIDITY_SIGN_UNKNOWN;
 	CamelCipherValidity *valid;
 	GString *description;
 
 	description = g_string_new ("");
 	valid = camel_cipher_validity_new ();
-	camel_cipher_validity_set_valid (valid, TRUE);
 	status = NSSCMSVS_Unverified;
 
 	/* NB: this probably needs to go into a decoding routine that can be used for processing
@@ -641,6 +776,7 @@ sm_verify_cmsg (CamelCipherContext *context,
 				for (j = 0; j < nsigners; j++) {
 					CERTCertificate *cert;
 					NSSCMSSignerInfo *si;
+					const gchar *status_description;
 					gchar *cn, *em;
 					gint idx;
 
@@ -648,6 +784,45 @@ sm_verify_cmsg (CamelCipherContext *context,
 					NSS_CMSSignedData_VerifySignerInfo (sigd, j, p->certdb, certUsageEmailSigner);
 
 					status = NSS_CMSSignerInfo_GetVerificationStatus (si);
+					status_description = sm_status_description (status, &sign_status);
+
+					/* certificate trust is verified first; check the signature itself,
+					   because CAMEL_CIPHER_VALIDITY_SIGN_UNKNOWN means "valid signature,
+					   but not trusted certificate" */
+					if (status == NSSCMSVS_SigningCertNotTrusted) {
+						NSSCMSContentInfo *cinfo;
+						SECOidData *algiddata;
+						SECItem *contentType, *digest;
+						SECOidTag oidTag;
+
+						cinfo = &(sigd->contentInfo);
+
+						/* find digest and contentType for signerinfo */
+						algiddata = camel_smime_NSS_CMSSignerInfo_GetDigestAlg (si);
+						oidTag = algiddata ? algiddata->offset : SEC_OID_UNKNOWN;
+						digest = camel_smime_NSS_CMSSignedData_GetDigestValue (sigd, oidTag);
+						/* NULL digest is acceptable. */
+						contentType = camel_smime_NSS_CMSContentInfo_GetContentTypeOID (cinfo);
+						/* NULL contentType is acceptable. */
+
+						/* now verify signature */
+						if (NSS_CMSSignerInfo_Verify (si, digest, contentType) != SECSuccess ||
+						    NSS_CMSSignerInfo_GetVerificationStatus (si) != NSSCMSVS_GoodSignature) {
+							sign_status = CAMEL_CIPHER_VALIDITY_SIGN_BAD;
+						}
+					}
+
+					#if defined (NSS_VMAJOR) && defined (NSS_VMINOR) && (NSS_VMAJOR > 3 || (NSS_VMAJOR == 3 && NSS_VMINOR >= 89))
+					if (status == NSSCMSVS_BadSignature) {
+						if (PORT_GetError () == SEC_ERROR_SIGNATURE_ALGORITHM_DISABLED) {
+							PORT_SetError (0);
+							status_description = _("Signature algorithm disabled");
+						} else if (PORT_GetError () == SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED) {
+							PORT_SetError (0);
+							status_description = _("Certificate signature algorithm disabled");
+						}
+					}
+					#endif
 
 					cn = NSS_CMSSignerInfo_GetSignerCommonName (si);
 					em = NSS_CMSSignerInfo_GetSignerEmailAddress (si);
@@ -655,7 +830,7 @@ sm_verify_cmsg (CamelCipherContext *context,
 					g_string_append_printf (
 						description, _("Signer: %s <%s>: %s\n"),
 						cn ? cn:"<unknown>", em ? em:"<unknown>",
-						sm_status_description (status));
+						status_description);
 
 					cert = NSS_CMSSignerInfo_GetSigningCertificate (si, p->certdb);
 
@@ -695,9 +870,6 @@ sm_verify_cmsg (CamelCipherContext *context,
 						PORT_Free (cn);
 					if (em)
 						PORT_Free (em);
-
-					if (status != NSSCMSVS_GoodSignature)
-						camel_cipher_validity_set_valid (valid, FALSE);
 				}
 			}
 			break;
@@ -716,7 +888,7 @@ sm_verify_cmsg (CamelCipherContext *context,
 		}
 	}
 
-	camel_cipher_validity_set_valid (valid, camel_cipher_validity_get_valid (valid) && status == NSSCMSVS_GoodSignature);
+	valid->sign.status = sign_status;
 	camel_cipher_validity_set_description (valid, description->str);
 	g_string_free (description, TRUE);
 
@@ -1119,6 +1291,7 @@ camel_smime_find_recipients_certs (CERTCertificate *cert,
 
 	/* Cannot short-circuit when frd->certs_missing is 0, because there can be better certificates */
 	if (!frd->recipients_table ||
+	    !(cert->keyUsage & certificateUsageEmailRecipient) ||
 	    CERT_CheckCertValidTimes (cert, frd->now, PR_FALSE) != secCertTimeValid) {
 		return SECFailure;
 	}
@@ -1250,18 +1423,12 @@ smime_context_encrypt_sync (CamelCipherContext *context,
 		goto fail;
 	}
 
-	frd.recipients_table = g_hash_table_new (camel_strcase_hash, camel_strcase_equal);
-	for (i = 0; i < recipients->len; i++) {
-		g_hash_table_insert (
-				frd.recipients_table,
-				recipients->pdata[i],
-				&recipient_certs[i]);
-	}
-	frd.certs_missing = g_hash_table_size (frd.recipients_table);
 	frd.now = PR_Now();
+	frd.recipients_table = g_hash_table_new (camel_strcase_hash, camel_strcase_equal);
+	frd.certs_missing = recipients->len;
 
-	for (link = gathered_certificates; link; link = g_slist_next (link)) {
-		const gchar *certstr = link->data;
+	for (i = 0, link = gathered_certificates; i < recipients->len; i++, link = g_slist_next (link)) {
+		const gchar *certstr = link ? link->data : NULL;
 
 		if (certstr && *certstr) {
 			CERTCertificate *cert = NULL;
@@ -1275,11 +1442,22 @@ smime_context_encrypt_sync (CamelCipherContext *context,
 
 			g_free (data);
 
+			/* Default to the provided certificate, if valid */
 			if (cert) {
-				camel_smime_find_recipients_certs (cert, NULL, &frd);
-				CERT_DestroyCertificate (cert);
+				if ((cert->keyUsage & certificateUsageEmailRecipient) != 0 &&
+				    CERT_CheckCertValidTimes (cert, frd.now, PR_FALSE) == secCertTimeValid) {
+					recipient_certs[i] = cert;
+					frd.certs_missing--;
+				} else {
+					CERT_DestroyCertificate (cert);
+				}
 			}
 		}
+
+		g_hash_table_insert (
+				frd.recipients_table,
+				recipients->pdata[i],
+				&recipient_certs[i]);
 	}
 
 	g_slist_free_full (gathered_certificates, g_free);
@@ -1293,7 +1471,7 @@ smime_context_encrypt_sync (CamelCipherContext *context,
 			CERTCertificate **hash_value = g_hash_table_lookup (frd.recipients_table, recipients->pdata[i]);
 			if (!hash_value || !*hash_value) {
 				g_set_error (
-					error, CAMEL_ERROR, CAMEL_ERROR_GENERIC,
+					error, CAMEL_CIPHER_CONTEXT_ERROR, CAMEL_CIPHER_CONTEXT_ERROR_KEY_NOT_FOUND,
 					_("No valid or appropriate certificate for “%s” was found"),
 					(gchar *) recipients->pdata[i]);
 				g_hash_table_destroy (frd.recipients_table);

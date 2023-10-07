@@ -60,7 +60,7 @@
  * attr = e_vcard_get_attribute (vcard, "ADR");
  *
  * g_assert_cmpstr (e_vcard_attribute_get_name (attr), ==, "ADR");
- * g_assert (e_vcard_attribute_is_single_valued (attr) == FALSE);
+ * g_assert_true (e_vcard_attribute_is_single_valued (attr) == FALSE);
  *
  * param_values = e_vcard_attribute_get_param (attr, "TYPE");
  * g_assert_cmpuint (g_list_length (param_values), ==, 1);
@@ -362,6 +362,8 @@ read_attribute_value (EVCardAttribute *attr,
 {
 	gchar *lp = *p;
 	const gchar *chunk_start = NULL;
+	gboolean is_singlevalue_type;
+	gboolean is_categories;
 	GString *str;
 
 	#define WRITE_CHUNK() G_STMT_START { \
@@ -369,6 +371,9 @@ read_attribute_value (EVCardAttribute *attr,
 			g_string_append_len (str, chunk_start, lp - chunk_start); \
 			chunk_start = NULL; \
 		} } G_STMT_END
+
+	is_singlevalue_type = e_vcard_attribute_is_singlevalue_type (attr);
+	is_categories = !g_ascii_strcasecmp (attr->name, EVC_CATEGORIES);
 
 	/* read in the value */
 	str = g_string_sized_new (16);
@@ -443,8 +448,8 @@ read_attribute_value (EVCardAttribute *attr,
 			}
 			lp = g_utf8_next_char (lp);
 		}
-		else if ((*lp == ';' && !e_vcard_attribute_is_singlevalue_type (attr)) ||
-			 (*lp == ',' && !g_ascii_strcasecmp (attr->name, "CATEGORIES"))) {
+		else if ((*lp == ';' && !is_singlevalue_type) ||
+			 (*lp == ',' && is_categories)) {
 			WRITE_CHUNK ();
 			if (charset) {
 				gchar *tmp;
@@ -844,7 +849,7 @@ parse (EVCard *evc,
 
 	attr = read_attribute (&p);
 	if (!attr || attr->group || g_ascii_strcasecmp (attr->name, "begin")) {
-		g_warning ("vcard began without a BEGIN:VCARD\n");
+		g_warning ("vcard began without a BEGIN:VCARD (%s)\n", str);
 	}
 	if (attr && !g_ascii_strcasecmp (attr->name, "begin")) {
 		e_vcard_attribute_free (attr);
@@ -874,7 +879,7 @@ parse (EVCard *evc,
 	}
 
 	if (!attr || attr->group || g_ascii_strcasecmp (attr->name, "end")) {
-		g_warning ("vcard ended without END:VCARD\n");
+		g_warning ("vcard ended without END:VCARD (%s)\n", str);
 	}
 
 	if (attr && !g_ascii_strcasecmp (attr->name, "end"))
@@ -1386,6 +1391,7 @@ e_vcard_to_string_vcard_30 (EVCard *evc)
 		GString *attr_str;
 		glong len;
 		EVCardAttributeParam *quoted_printable_param = NULL;
+		gboolean is_categories;
 
 		if (!g_ascii_strcasecmp (attr->name, "VERSION"))
 			continue;
@@ -1463,6 +1469,8 @@ e_vcard_to_string_vcard_30 (EVCard *evc)
 
 		g_string_append_c (attr_str, ':');
 
+		is_categories = !g_ascii_strcasecmp (attr->name, EVC_CATEGORIES);
+
 		for (v = attr->values; v; v = v->next) {
 			gchar *value = v->data;
 			gchar *escaped_value = NULL;
@@ -1487,7 +1495,7 @@ e_vcard_to_string_vcard_30 (EVCard *evc)
 				/* XXX toshok - i hate you, rfc 2426.
 				 * why doesn't CATEGORIES use a; like
 				 * a normal list attribute? */
-				if (!g_ascii_strcasecmp (attr->name, "CATEGORIES"))
+				if (is_categories)
 					g_string_append_c (attr_str, ',');
 				else
 					g_string_append_c (attr_str, ';');
@@ -2799,9 +2807,9 @@ e_vcard_attribute_get_value_decoded (EVCardAttribute *attr)
  * ]|
  * the following holds true:
  * |[
- * g_assert (e_vcard_attribute_has_type (attr, "WORK") == TRUE);
- * g_assert (e_vcard_attribute_has_type (attr, "voice") == TRUE);
- * g_assert (e_vcard_attribute_has_type (attr, "HOME") == FALSE);
+ * g_assert_true (e_vcard_attribute_has_type (attr, "WORK") == TRUE);
+ * g_assert_true (e_vcard_attribute_has_type (attr, "voice") == TRUE);
+ * g_assert_true (e_vcard_attribute_has_type (attr, "HOME") == FALSE);
  * ]|
  *
  * Comparisons against @typestr are case-insensitive.

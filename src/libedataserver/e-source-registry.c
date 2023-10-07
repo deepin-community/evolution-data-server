@@ -46,11 +46,6 @@
 #include <glib/gstdio.h>
 #include <glib/gi18n-lib.h>
 
-/* XXX Yeah, yeah... */
-#define GCR_API_SUBJECT_TO_CHANGE
-
-#include <gcr/gcr-base.h>
-
 /* Private D-Bus classes. */
 #include "e-dbus-source.h"
 #include "e-dbus-source-manager.h"
@@ -309,9 +304,14 @@ source_registry_dbus_object_dup_uid (GDBusObject *dbus_object)
 	EDBusObject *e_dbus_object;
 	EDBusSource *e_dbus_source;
 
-	/* EDBusSource interface should always be present. */
+	if (!E_DBUS_IS_OBJECT (dbus_object))
+		return NULL;
+
 	e_dbus_object = E_DBUS_OBJECT (dbus_object);
 	e_dbus_source = e_dbus_object_peek_source (e_dbus_object);
+
+	if (!E_DBUS_IS_SOURCE (e_dbus_source))
+		return NULL;
 
 	return e_dbus_source_dup_uid (e_dbus_source);
 }
@@ -845,6 +845,9 @@ source_registry_object_added_no_owner (ESourceRegistry *registry,
 
 	uid = source_registry_dbus_object_dup_uid (dbus_object);
 
+	if (!uid)
+		return;
+
 	if (source_registry_service_restart_table_remove (registry, uid))
 		source = e_source_registry_ref_source (registry, uid);
 
@@ -961,7 +964,8 @@ source_registry_object_removed_no_owner (ESourceRegistry *registry,
 		gchar *uid;
 
 		uid = source_registry_dbus_object_dup_uid (dbus_object);
-		source_registry_service_restart_table_add (registry, uid);
+		if (uid)
+			source_registry_service_restart_table_add (registry, uid);
 		g_free (uid);
 	}
 }
@@ -1792,7 +1796,7 @@ e_source_registry_init (ESourceRegistry *registry)
  * Since 3.12 a singleton will be returned.  No strong reference is kept
  * internally, so it is the caller's responsibility to keep one.
  *
- * Returns: a new #ESourceRegistry, or %NULL
+ * Returns: a new #ESourceRegistry, or %NULL on error
  *
  * Since: 3.6
  **/
@@ -1886,7 +1890,7 @@ e_source_registry_new (GCancellable *cancellable,
  * If an error occurs in connecting to the D-Bus service, the function
  * sets @error and returns %NULL.
  *
- * Returns: a new #ESourceRegistry, or %NULL
+ * Returns: a new #ESourceRegistry, or %NULL on error
  *
  * Since: 3.6
  **/
@@ -3471,7 +3475,8 @@ source_registry_ref_any_mail_identity (ESourceRegistry *registry)
  * The returned #ESource is referenced for thread-safety and must be
  * unreferenced with g_object_unref() when finished with it.
  *
- * Returns: (transfer full): the default mail identity #ESource, or %NULL
+ * Returns: (transfer full) (nullable): the default mail identity #ESource,
+ *    or %NULL
  *
  * Since: 3.6
  **/

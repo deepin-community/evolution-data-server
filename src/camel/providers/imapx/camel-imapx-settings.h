@@ -58,11 +58,11 @@ struct _CamelIMAPXSettingsClass {
 };
 
 GType		camel_imapx_settings_get_type	(void) G_GNUC_CONST;
-guint		camel_imapx_settings_get_use_multi_fetch
+gboolean	camel_imapx_settings_get_use_multi_fetch
 						(CamelIMAPXSettings *settings);
 void		camel_imapx_settings_set_use_multi_fetch
 						(CamelIMAPXSettings *settings,
-						 guint use_multi_fetch);
+						 gboolean use_multi_fetch);
 gboolean	camel_imapx_settings_get_check_all
 						(CamelIMAPXSettings *settings);
 void		camel_imapx_settings_set_check_all
@@ -176,6 +176,16 @@ gboolean	camel_imapx_settings_get_full_update_on_metered_network
 void		camel_imapx_settings_set_full_update_on_metered_network
 						(CamelIMAPXSettings *settings,
 						 gboolean full_update_on_metered_network);
+gboolean	camel_imapx_settings_get_send_client_id
+						(CamelIMAPXSettings *settings);
+void		camel_imapx_settings_set_send_client_id
+						(CamelIMAPXSettings *settings,
+						 gboolean send_client_id);
+gboolean	camel_imapx_settings_get_single_client_mode
+						(CamelIMAPXSettings *settings);
+void		camel_imapx_settings_set_single_client_mode
+						(CamelIMAPXSettings *settings,
+						 gboolean single_client_mode);
 
 G_END_DECLS
 

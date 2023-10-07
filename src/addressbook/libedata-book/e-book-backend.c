@@ -35,6 +35,7 @@
 
 #include "e-data-book-view.h"
 #include "e-data-book.h"
+#include "e-data-book-view-watcher-memory.h"
 #include "e-book-backend.h"
 
 typedef struct _AsyncContext AsyncContext;
@@ -47,7 +48,7 @@ struct _EBookBackendPrivate {
 	gboolean opened;
 
 	GMutex views_mutex;
-	GList *views;
+	GHashTable *views; /* EDataBookView::id ~> ViewData * */
 
 	GMutex property_lock;
 	GProxyResolver *proxy_resolver;
@@ -116,6 +117,28 @@ enum {
 static guint signals[LAST_SIGNAL];
 
 G_DEFINE_TYPE_WITH_PRIVATE (EBookBackend, e_book_backend, E_TYPE_BACKEND)
+
+typedef struct _ViewData {
+	EDataBookView *view;
+	GObject *user_data;
+	EBookClientViewSortFields *sort_fields;
+	EBookIndices *indices;
+	guint n_total;
+} ViewData;
+
+static void
+view_data_free (gpointer ptr)
+{
+	ViewData *vd = ptr;
+
+	if (vd) {
+		g_clear_object (&vd->view);
+		g_clear_object (&vd->user_data);
+		e_book_client_view_sort_fields_free (vd->sort_fields);
+		e_book_indices_free (vd->indices);
+		g_free (vd);
+	}
+}
 
 static void
 async_context_free (AsyncContext *async_context)
@@ -512,8 +535,7 @@ book_backend_dispose (GObject *object)
 	g_clear_object (&priv->authentication_source);
 
 	g_mutex_lock (&priv->views_mutex);
-	g_list_free_full (priv->views, g_object_unref);
-	priv->views = NULL;
+	g_clear_pointer (&priv->views, g_hash_table_unref);
 	g_mutex_unlock (&priv->views_mutex);
 
 	g_mutex_lock (&priv->operation_lock);
@@ -552,6 +574,8 @@ book_backend_finalize (GObject *object)
 
 	/* Chain up to parent's finalize() method. */
 	G_OBJECT_CLASS (e_book_backend_parent_class)->finalize (object);
+
+	e_util_call_malloc_trim ();
 }
 
 static void
@@ -693,6 +717,112 @@ book_backend_shutdown (EBookBackend *backend)
 		"The %s instance for \"%s\" is shutting down.\n",
 		G_OBJECT_TYPE_NAME (backend),
 		e_source_get_display_name (source));
+
+	e_util_call_malloc_trim ();
+}
+
+/* Should have acquired views_mutex */
+static ViewData *
+e_book_backend_get_view_data_by_id_locked (EBookBackend *backend,
+					   gsize view_id)
+{
+	g_return_val_if_fail (E_IS_BACKEND (backend), NULL);
+
+	return g_hash_table_lookup (backend->priv->views, GSIZE_TO_POINTER (view_id));
+}
+
+static void
+book_backend_set_view_sort_fields (EBookBackend *backend,
+				   gsize view_id,
+				   const EBookClientViewSortFields *fields)
+{
+	GObject *view_watcher;
+	ViewData *vd;
+
+	g_return_if_fail (E_IS_BOOK_BACKEND (backend));
+
+	g_mutex_lock (&backend->priv->views_mutex);
+
+	vd = e_book_backend_get_view_data_by_id_locked (backend, view_id);
+
+	if (vd && vd->sort_fields != fields) {
+		e_book_client_view_sort_fields_free (vd->sort_fields);
+		vd->sort_fields = e_book_client_view_sort_fields_copy (fields);
+	}
+
+	g_mutex_unlock (&backend->priv->views_mutex);
+
+	view_watcher = e_book_backend_ref_view_user_data (backend, view_id);
+
+	if (E_IS_DATA_BOOK_VIEW_WATCHER_MEMORY (view_watcher)) {
+		e_data_book_view_watcher_memory_take_sort_fields (E_DATA_BOOK_VIEW_WATCHER_MEMORY (view_watcher),
+			e_book_client_view_sort_fields_copy (fields));
+	}
+
+	g_clear_object (&view_watcher);
+}
+
+static guint
+book_backend_get_view_n_total (EBookBackend *backend,
+			       gsize view_id)
+{
+	ViewData *vd;
+	guint n_total = 0;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND (backend), 0);
+
+	g_mutex_lock (&backend->priv->views_mutex);
+
+	vd = e_book_backend_get_view_data_by_id_locked (backend, view_id);
+
+	if (vd)
+		n_total = vd->n_total;
+
+	g_mutex_unlock (&backend->priv->views_mutex);
+
+	return n_total;
+}
+
+static EBookIndices *
+book_backend_dup_view_indices (EBookBackend *backend,
+			       gsize view_id)
+{
+	EBookIndices *indices = NULL;
+	ViewData *vd;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND (backend), NULL);
+
+	g_mutex_lock (&backend->priv->views_mutex);
+
+	vd = e_book_backend_get_view_data_by_id_locked (backend, view_id);
+
+	if (vd)
+		indices = e_book_indices_copy (vd->indices);
+
+	g_mutex_unlock (&backend->priv->views_mutex);
+
+	return indices;
+}
+
+static GPtrArray *
+book_backend_dup_view_contacts (EBookBackend *backend,
+				gsize view_id,
+				guint range_start,
+				guint range_length)
+{
+	GObject *view_watcher;
+	GPtrArray *contacts = NULL;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND (backend), NULL);
+
+	view_watcher = e_book_backend_ref_view_user_data (backend, view_id);
+
+	if (E_IS_DATA_BOOK_VIEW_WATCHER_MEMORY (view_watcher))
+		contacts = e_data_book_view_watcher_memory_dup_contacts (E_DATA_BOOK_VIEW_WATCHER_MEMORY (view_watcher), range_start, range_length);
+
+	g_clear_object (&view_watcher);
+
+	return contacts;
 }
 
 static void
@@ -715,6 +845,10 @@ e_book_backend_class_init (EBookBackendClass *class)
 	class->impl_get_backend_property = book_backend_get_backend_property;
 	class->impl_notify_update = book_backend_notify_update;
 	class->shutdown = book_backend_shutdown;
+	class->impl_set_view_sort_fields = book_backend_set_view_sort_fields;
+	class->impl_get_view_n_total = book_backend_get_view_n_total;
+	class->impl_dup_view_indices = book_backend_dup_view_indices;
+	class->impl_dup_view_contacts = book_backend_dup_view_contacts;
 
 	g_object_class_install_property (
 		object_class,
@@ -805,7 +939,7 @@ e_book_backend_init (EBookBackend *backend)
 {
 	backend->priv = e_book_backend_get_instance_private (backend);
 
-	backend->priv->views = NULL;
+	backend->priv->views = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, view_data_free);
 	g_mutex_init (&backend->priv->views_mutex);
 	g_mutex_init (&backend->priv->property_lock);
 	g_mutex_init (&backend->priv->operation_lock);
@@ -1991,7 +2125,7 @@ e_book_backend_remove_contacts_finish (EBookBackend *backend,
  *
  * If an error occurs, the function will set @error and return %NULL.
  *
- * Returns: (transfer full): an #EContact, or %NULL
+ * Returns: (transfer full): an #EContact, or %NULL on error
  *
  * Since: 3.10
  **/
@@ -2136,7 +2270,7 @@ e_book_backend_get_contact (EBookBackend *backend,
  *
  * If an error occurred, the function will set @error and return %NULL.
  *
- * Returns: (transfer full): an #EContact, or %NULL
+ * Returns: (transfer full): an #EContact, or %NULL on error
  *
  * Since: 3.10
  **/
@@ -2575,6 +2709,188 @@ e_book_backend_get_contact_list_uids_finish (EBookBackend *backend,
 }
 
 /**
+ * e_book_backend_contains_email_sync:
+ * @backend: an #EBookBackend
+ * @email_address: an email address
+ * @cancellable: optional #GCancellable object, or %NULL
+ * @error: return location for a #GError, or %NULL
+ *
+ * Checks whether contains an @email_address. When the @email_address
+ * contains multiple addresses, then returns %TRUE when at least one
+ * address exists in the address book.
+ *
+ * If an error occurs, the function will set @error and return %FALSE.
+ *
+ * Returns: %TRUE when found the @email_address, %FALSE on failure
+ *
+ * Since: 3.44
+ **/
+gboolean
+e_book_backend_contains_email_sync (EBookBackend *backend,
+				    const gchar *email_address,
+				    GCancellable *cancellable,
+				    GError **error)
+{
+	EAsyncClosure *closure;
+	GAsyncResult *result;
+	gboolean success;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND (backend), FALSE);
+	g_return_val_if_fail (email_address != NULL, FALSE);
+
+	closure = e_async_closure_new ();
+
+	e_book_backend_contains_email (backend, email_address, cancellable,
+		e_async_closure_callback, closure);
+
+	result = e_async_closure_wait (closure);
+
+	success = e_book_backend_contains_email_finish (backend, result, error);
+
+	e_async_closure_free (closure);
+
+	return success;
+}
+
+/* Helper for e_book_backend_contains_email() */
+static void
+book_backend_contains_email_thread (GSimpleAsyncResult *simple,
+				    GObject *source_object,
+				    GCancellable *cancellable)
+{
+	EBookBackend *backend;
+	EBookBackendClass *klass;
+	EDataBook *data_book;
+	AsyncContext *async_context;
+
+	backend = E_BOOK_BACKEND (source_object);
+
+	klass = E_BOOK_BACKEND_GET_CLASS (backend);
+	g_return_if_fail (klass != NULL);
+
+	if (!klass->impl_contains_email) {
+		g_simple_async_result_take_error (simple, e_client_error_create (E_CLIENT_ERROR_NOT_SUPPORTED, NULL));
+		g_simple_async_result_complete_in_idle (simple);
+		return;
+	}
+
+	data_book = e_book_backend_ref_data_book (backend);
+	g_return_if_fail (data_book != NULL);
+
+	async_context = g_simple_async_result_get_op_res_gpointer (simple);
+
+	if (!e_book_backend_is_opened (backend)) {
+		g_simple_async_result_take_error (simple, e_client_error_create (E_CLIENT_ERROR_NOT_OPENED, NULL));
+		g_simple_async_result_complete_in_idle (simple);
+	} else {
+		guint32 opid;
+
+		opid = book_backend_stash_operation (backend, simple);
+
+		klass->impl_contains_email (backend, data_book, opid, cancellable, async_context->query);
+	}
+
+	g_object_unref (data_book);
+}
+
+/**
+ * e_book_backend_contains_email:
+ * @backend: an #EBookBackend
+ * @email_address: an email address
+ * @cancellable: optional #GCancellable object, or %NULL
+ * @callback: a #GAsyncReadyCallback to call when the request is satisfied
+ * @user_data: data to pass to the callback function
+ *
+ * Asynchronously checks whether contains an @email_address. When the @email_address
+ * contains multiple addresses, then returns %TRUE when at least one
+ * address exists in the address book.
+ *
+ * When the operation is finished, @callback will be called.  You can then
+ * call e_book_backend_contains_email_finish() to get the result of the
+ * operation.
+ *
+ * Since: 3.44
+ **/
+void
+e_book_backend_contains_email (EBookBackend *backend,
+			       const gchar *email_address,
+			       GCancellable *cancellable,
+			       GAsyncReadyCallback callback,
+			       gpointer user_data)
+{
+	EBookBackendClass *klass;
+	GSimpleAsyncResult *simple;
+	AsyncContext *async_context;
+
+	g_return_if_fail (E_IS_BOOK_BACKEND (backend));
+	g_return_if_fail (email_address != NULL);
+
+	klass = E_BOOK_BACKEND_GET_CLASS (backend);
+	g_return_if_fail (klass != NULL);
+
+	async_context = g_slice_new0 (AsyncContext);
+	async_context->query = g_strdup (email_address);
+
+	simple = g_simple_async_result_new (
+		G_OBJECT (backend), callback, user_data,
+		e_book_backend_contains_email);
+
+	g_simple_async_result_set_check_cancellable (simple, cancellable);
+
+	g_simple_async_result_set_op_res_gpointer (
+		simple, async_context, (GDestroyNotify) async_context_free);
+
+	if (klass->impl_contains_email != NULL) {
+		book_backend_push_operation (
+			backend, simple, cancellable, FALSE,
+			book_backend_contains_email_thread);
+		book_backend_dispatch_next_operation (backend);
+
+	} else {
+		g_simple_async_result_take_error (simple, e_client_error_create (E_CLIENT_ERROR_NOT_SUPPORTED, NULL));
+		g_simple_async_result_complete_in_idle (simple);
+	}
+
+	g_object_unref (simple);
+}
+
+/**
+ * e_book_backend_contains_email_finish:
+ * @backend: an #EBookBackend
+ * @result: a #GAsyncResult
+ * @error: return location for a #GError, or %NULL
+ *
+ * Finishes the operation started with e_book_backend_contains_email().
+ *
+ * If an error occurred, the function will set @error and return %FALSE.
+ *
+ * Returns: %TRUE on success, %FALSE on failure
+ *
+ * Since: 3.44
+ **/
+gboolean
+e_book_backend_contains_email_finish (EBookBackend *backend,
+				      GAsyncResult *result,
+				      GError **error)
+{
+	GSimpleAsyncResult *simple;
+
+	g_return_val_if_fail (
+		g_simple_async_result_is_valid (
+		result, G_OBJECT (backend),
+		e_book_backend_contains_email), FALSE);
+
+	simple = G_SIMPLE_ASYNC_RESULT (result);
+
+	book_backend_unblock_operations (backend, simple);
+
+	if (g_simple_async_result_propagate_error (simple, error))
+		return FALSE;
+
+	return g_simple_async_result_get_op_res_gboolean (simple);
+}
+
+/**
  * e_book_backend_start_view:
  * @backend: an #EBookBackend
  * @view: the #EDataBookView to start
@@ -2595,7 +2911,24 @@ e_book_backend_start_view (EBookBackend *backend,
 	g_return_if_fail (class != NULL);
 	g_return_if_fail (class->impl_start_view);
 
+	if ((e_data_book_view_get_flags (view) & E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY) != 0 &&
+	    class->impl_dup_view_contacts == book_backend_dup_view_contacts) {
+		EBookClientViewSortFields *sort_fields;
+		GObject *view_watcher;
+		gsize view_id;
+
+		view_id = e_data_book_view_get_id (view);
+		sort_fields = e_book_backend_dup_view_sort_fields (backend, view_id);
+
+		view_watcher = e_data_book_view_watcher_memory_new (backend, view);
+		e_data_book_view_watcher_memory_take_sort_fields (E_DATA_BOOK_VIEW_WATCHER_MEMORY (view_watcher), sort_fields);
+
+		e_book_backend_take_view_user_data (backend, view_id, view_watcher);
+	}
+
 	class->impl_start_view (backend, view);
+
+	e_util_call_malloc_trim ();
 }
 
 /**
@@ -2619,6 +2952,13 @@ e_book_backend_stop_view (EBookBackend *backend,
 	g_return_if_fail (class->impl_stop_view != NULL);
 
 	class->impl_stop_view (backend, view);
+
+	if ((e_data_book_view_get_flags (view) & E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY) != 0 &&
+	    class->impl_dup_view_contacts == book_backend_dup_view_contacts) {
+		e_book_backend_take_view_user_data (backend, e_data_book_view_get_id (view), NULL);
+	}
+
+	e_util_call_malloc_trim ();
 }
 
 /**
@@ -2632,12 +2972,16 @@ void
 e_book_backend_add_view (EBookBackend *backend,
                          EDataBookView *view)
 {
+	ViewData *vd;
+
 	g_return_if_fail (E_IS_BOOK_BACKEND (backend));
 
 	g_mutex_lock (&backend->priv->views_mutex);
 
-	g_object_ref (view);
-	backend->priv->views = g_list_append (backend->priv->views, view);
+	vd = g_new0 (ViewData, 1);
+	vd->view = g_object_ref (view);
+
+	g_hash_table_insert (backend->priv->views, GSIZE_TO_POINTER (e_data_book_view_get_id (view)), vd);
 
 	g_mutex_unlock (&backend->priv->views_mutex);
 }
@@ -2653,8 +2997,6 @@ void
 e_book_backend_remove_view (EBookBackend *backend,
                             EDataBookView *view)
 {
-	GList *list, *link;
-
 	g_return_if_fail (E_IS_BOOK_BACKEND (backend));
 
 	/* In case the view holds the last reference to backend */
@@ -2662,15 +3004,7 @@ e_book_backend_remove_view (EBookBackend *backend,
 
 	g_mutex_lock (&backend->priv->views_mutex);
 
-	list = backend->priv->views;
-
-	link = g_list_find (list, view);
-	if (link != NULL) {
-		g_object_unref (view);
-		list = g_list_delete_link (list, link);
-	}
-
-	backend->priv->views = list;
+	g_hash_table_remove (backend->priv->views, GSIZE_TO_POINTER (e_data_book_view_get_id (view)));
 
 	g_mutex_unlock (&backend->priv->views_mutex);
 
@@ -2701,19 +3035,27 @@ e_book_backend_remove_view (EBookBackend *backend,
 GList *
 e_book_backend_list_views (EBookBackend *backend)
 {
-	GList *list;
+	GList *list = NULL;
 
 	g_return_val_if_fail (E_IS_BOOK_BACKEND (backend), NULL);
 
 	g_mutex_lock (&backend->priv->views_mutex);
 
-	/* XXX Use g_list_copy_deep() once we require GLib >= 2.34. */
-	list = g_list_copy (backend->priv->views);
-	g_list_foreach (list, (GFunc) g_object_ref, NULL);
+	if (backend->priv->views) {
+		GHashTableIter iter;
+		gpointer value;
+
+		g_hash_table_iter_init (&iter, backend->priv->views);
+		while (g_hash_table_iter_next (&iter, NULL, &value)) {
+			ViewData *vd = value;
+
+			list = g_list_prepend (list, g_object_ref (vd->view));
+		}
+	}
 
 	g_mutex_unlock (&backend->priv->views_mutex);
 
-	return list;
+	return g_list_reverse (list);
 }
 
 /**
@@ -3225,7 +3567,7 @@ e_book_backend_prepare_for_completion (EBookBackend *backend,
  * with e_book_backend_delete_cursor() when no longer needed.
  *
  * Returns: (transfer none): A newly created cursor, the cursor belongs
- * to the backend and should not be unreffed, or %NULL
+ *    to the backend and should not be unreffed, or %NULL on error
  *
  * Since: 3.12
  */
@@ -3348,4 +3690,390 @@ e_book_backend_schedule_custom_operation (EBookBackend *book_backend,
 	g_mutex_unlock (&book_backend->priv->operation_lock);
 
 	book_backend_dispatch_next_operation (book_backend);
+}
+
+/**
+ * e_book_backend_ref_view:
+ * @backend: an #EBookBackend
+ * @view_id: a view identifier
+ *
+ * References an #EDataBookView by its identifier.
+ *
+ * Unref the returned non-NULL view with g_object_unref(),
+ * when no longer needed.
+ *
+ * Returns: (transfer full) (nullable): a referenced #EDataBookView corresponding
+ *    to the given @view_id, or %NULL, when it cannot be found
+ *
+ * Since: 3.50
+ **/
+EDataBookView *
+e_book_backend_ref_view (EBookBackend *backend,
+			 gsize view_id)
+{
+	ViewData *vd;
+	EDataBookView *view = NULL;
+
+	g_return_val_if_fail (E_IS_BACKEND (backend), NULL);
+
+	g_mutex_lock (&backend->priv->views_mutex);
+
+	vd = e_book_backend_get_view_data_by_id_locked (backend,view_id);
+
+	if (vd && vd->view)
+		view = g_object_ref (vd->view);
+
+	g_mutex_unlock (&backend->priv->views_mutex);
+
+	return view;
+}
+
+/**
+ * e_book_backend_ref_view_user_data:
+ * @backend: an #EBookBackend
+ * @view_id: a view identifier
+ *
+ * References user data previously set by e_book_backend_take_view_user_data()
+ * for the @view_id.
+ *
+ * Free the returned non-NULL object with g_object_unref(),
+ * when no longer needed.
+ *
+ * Returns: (transfer full) (type GObject): previously set user data for the @view_id,
+ *   or %NULL when none had been set yet or when the view does not exist.
+ *
+ * Since: 3.50
+ **/
+gpointer
+e_book_backend_ref_view_user_data (EBookBackend *backend,
+				   gsize view_id)
+{
+	ViewData *vd;
+	GObject *user_data = NULL;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND (backend), NULL);
+
+	g_mutex_lock (&backend->priv->views_mutex);
+
+	vd = e_book_backend_get_view_data_by_id_locked (backend, view_id);
+
+	if (vd && vd->user_data)
+		user_data = g_object_ref (vd->user_data);
+
+	g_mutex_unlock (&backend->priv->views_mutex);
+
+	return user_data;
+}
+
+/**
+ * e_book_backend_take_view_user_data:
+ * @backend: an #EBookBackend
+ * @view_id: a view identifier
+ * @user_data: (nullable) (transfer full): user data to set
+ *
+ * Sets the user data for the @view_id. The function assumes ownership
+ * of the @user_data. The @user_data can be %NULL, which unsets
+ * the current user data for the view.
+ *
+ * This is primarily aimed as a helper for backend implementations
+ * of the manual query views (%E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY).
+ *
+ * Since: 3.50
+ **/
+void
+e_book_backend_take_view_user_data (EBookBackend *backend,
+				    gsize view_id,
+				    GObject *user_data)
+{
+	ViewData *vd;
+
+	g_return_if_fail (E_IS_BOOK_BACKEND (backend));
+	if (user_data)
+		g_return_if_fail (G_IS_OBJECT (user_data));
+
+	g_mutex_lock (&backend->priv->views_mutex);
+
+	vd = e_book_backend_get_view_data_by_id_locked (backend, view_id);
+
+	if (vd && vd->user_data != user_data) {
+		g_clear_object (&vd->user_data);
+		vd->user_data = user_data;
+	} else {
+		g_clear_object (&user_data);
+	}
+
+	g_mutex_unlock (&backend->priv->views_mutex);
+}
+
+/**
+ * e_book_backend_dup_view_sort_fields:
+ * @backend: an #EBookBackend
+ * @view_id: a view identifier
+ *
+ * Returns currently used sort fields for manual query views. The returned
+ * array is NULL only if the view could not be found. The default sort is
+ * by the file-as filed in ascending order.
+ *
+ * The array is terminated by an item with an %E_CONTACT_FIELD_LAST field.
+ *
+ * Free the returned array with e_book_client_view_sort_fields_free(),
+ * when no longer needed.
+ *
+ * Note: This function should be used only with @E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY views.
+ *
+ * Returns: (transfer full): current sort fields for the @view_id, as an #EBookClientViewSortFields
+ *    array, or %NULL, when the view could not be found.
+ *
+ * Since: 3.50
+ **/
+EBookClientViewSortFields *
+e_book_backend_dup_view_sort_fields (EBookBackend *backend,
+				     gsize view_id)
+{
+	EBookClientViewSortFields *fields = NULL;
+	ViewData *vd;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND (backend), NULL);
+
+	g_mutex_lock (&backend->priv->views_mutex);
+
+	vd = e_book_backend_get_view_data_by_id_locked (backend, view_id);
+
+	if (vd && vd->sort_fields)
+		fields = e_book_client_view_sort_fields_copy (vd->sort_fields);
+
+	if (vd && !fields) {
+		EBookClientViewSortFields tmp_fields[] = {
+			{ E_CONTACT_FILE_AS, E_BOOK_CURSOR_SORT_ASCENDING },
+			{ E_CONTACT_FIELD_LAST, E_BOOK_CURSOR_SORT_ASCENDING }
+		};
+
+		fields = e_book_client_view_sort_fields_copy (tmp_fields);
+	}
+
+	g_mutex_unlock (&backend->priv->views_mutex);
+
+	return fields;
+}
+
+/**
+ * e_book_backend_set_view_sort_fields:
+ * @backend: an #EBookBackend
+ * @view_id: a view identifier
+ * @fields: (nullable): an array of #EBookClientViewSortFields, or %NULL
+ *
+ * Sets the sort fields for the view identified by the @view_id.
+ * The @fields array should be terminated by an item, which has
+ * the field member set to %E_CONTACT_FIELD_LAST.
+ *
+ * When the @fields is %NULL, the sort by file-as in ascending order
+ * is used instead.
+ *
+ * The default implementation of this virtual method stores
+ * the @fields into the internal structure for the @backend,
+ * to be available by e_book_backend_dup_view_sort_fields().
+ *
+ * Note: This function should be used only with @E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY views.
+ *
+ * Since: 3.50
+ **/
+void
+e_book_backend_set_view_sort_fields (EBookBackend *backend,
+				     gsize view_id,
+				     const EBookClientViewSortFields *fields)
+{
+	EBookBackendClass *klass;
+
+	g_return_if_fail (E_IS_BOOK_BACKEND (backend));
+
+	klass = E_BOOK_BACKEND_GET_CLASS (backend);
+	g_return_if_fail (klass != NULL);
+	g_return_if_fail (klass->impl_set_view_sort_fields != NULL);
+
+	klass->impl_set_view_sort_fields (backend, view_id, fields);
+}
+
+/**
+ * e_book_backend_get_view_n_total:
+ * @backend: an #EBookBackend
+ * @view_id: a view identifier
+ *
+ * Returns how many contacts the view identified by @view_id
+ * contains.
+ *
+ * The default implementation of this virtual method returns
+ * the value previously set by e_book_backend_set_view_n_total().
+ *
+ * Note: This function should be used only with @E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY views.
+ *
+ * Returns: how many contacts the view identified by @view_id
+ *    contains.
+ *
+ * Since: 3.50
+ **/
+guint
+e_book_backend_get_view_n_total (EBookBackend *backend,
+				 gsize view_id)
+{
+	EBookBackendClass *klass;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND (backend), 0);
+
+	klass = E_BOOK_BACKEND_GET_CLASS (backend);
+	g_return_val_if_fail (klass != NULL, 0);
+	g_return_val_if_fail (klass->impl_get_view_n_total != NULL, 0);
+
+	return klass->impl_get_view_n_total (backend, view_id);
+}
+
+/**
+ * e_book_backend_set_view_n_total:
+ * @backend: an #EBookBackend
+ * @view_id: a view identifier
+ * @n_total: the value to set
+ *
+ * Stores how many contacts the view identified by @view_id
+ * contains. It also sets the @n_total to the corresponding
+ * #EDataBookView, if such exists. The function does nothing
+ * when the view cannot be found.
+ *
+ * Note: This function should be used only with @E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY views.
+ *
+ * Since: 3.50
+ **/
+void
+e_book_backend_set_view_n_total (EBookBackend *backend,
+				 gsize view_id,
+				 guint n_total)
+{
+	ViewData *vd;
+
+	g_return_if_fail (E_IS_BOOK_BACKEND (backend));
+
+	g_mutex_lock (&backend->priv->views_mutex);
+
+	vd = e_book_backend_get_view_data_by_id_locked (backend, view_id);
+
+	if (vd && vd->n_total != n_total) {
+		vd->n_total = n_total;
+
+		e_data_book_view_set_n_total (vd->view, vd->n_total);
+	}
+
+	g_mutex_unlock (&backend->priv->views_mutex);
+}
+
+/**
+ * e_book_backend_dup_view_indices:
+ * @backend: an #EBookBackend
+ * @view_id: a view identifier
+ *
+ * Returns a list of #EBookIndices holding indices of the contacts
+ * in the view identified by @view_id. The array is terminated by an item
+ * with chr member being %NULL.
+ *
+ * The default implementation returns an array previously set
+ * by e_book_backend_set_view_indices().
+ *
+ * Free the returned array with e_book_indices_free(), when no longer needed.
+ *
+ * Note: This function should be used only with @E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY views.
+ *
+ * Returns: (transfer full) (nullable): an array of #EBookIndices, or %NULL
+ *
+ * Since: 3.50
+ **/
+EBookIndices *
+e_book_backend_dup_view_indices (EBookBackend *backend,
+				 gsize view_id)
+{
+	EBookBackendClass *klass;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND (backend), NULL);
+
+	klass = E_BOOK_BACKEND_GET_CLASS (backend);
+	g_return_val_if_fail (klass != NULL, NULL);
+	g_return_val_if_fail (klass->impl_dup_view_indices != NULL, NULL);
+
+	return klass->impl_dup_view_indices (backend, view_id);
+}
+
+/**
+ * e_book_backend_set_view_indices:
+ * @backend: an #EBookBackend
+ * @view_id: a view identifier
+ * @indices: (nullable): an array of #EBookIndices, or %NULL
+ *
+ * Stores current @indices for the view identified by the @view_id and,
+ * if such exists, notifies about it also the corresponding #EDataBookView.
+ * The array is terminated by an item with chr member being %NULL.
+ *
+ * Note: This function should be used only with @E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY views.
+ *
+ * Since: 3.50
+ **/
+void
+e_book_backend_set_view_indices (EBookBackend *backend,
+				 gsize view_id,
+				 const EBookIndices *indices)
+{
+	ViewData *vd;
+
+	g_return_if_fail (E_IS_BOOK_BACKEND (backend));
+
+	g_mutex_lock (&backend->priv->views_mutex);
+
+	vd = e_book_backend_get_view_data_by_id_locked (backend, view_id);
+
+	if (vd && vd->indices != indices) {
+		e_book_indices_free (vd->indices);
+		vd->indices = e_book_indices_copy (indices);
+
+		e_data_book_view_set_indices (vd->view, vd->indices);
+	}
+
+	g_mutex_unlock (&backend->priv->views_mutex);
+}
+
+/**
+ * e_book_backend_dup_view_contacts:
+ * @backend: an #EBookBackend
+ * @view_id: a view identifier
+ * @range_start: 0-based range start to retrieve the contacts for
+ * @range_length: how many contacts to retrieve
+ *
+ * Returns @range_length contacts from 0-based index @range_start
+ * in the view identified by the @view_id.
+ * When there are asked more than e_book_backend_get_view_n_total()
+ * contacts only those up to the total number of contacts are read.
+ * Asking for out of range contacts results in an error, though
+ * it can return less than @range_length contacts.
+ *
+ * The default implementation tracks the view's content in memory
+ * and returns the contacts as needed. The subclasses can do more
+ * efficient implementation.
+ *
+ * Note: This function should be used only with @E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY views.
+ *
+ * Returns: (transfer container) (element-type EContact) (nullable):
+ *    an array of the contacts, or %NULL, when the view cannot be found
+ *    or when the @range_start is out of bounds.
+ *
+ * Since: 3.50
+ **/
+GPtrArray *
+e_book_backend_dup_view_contacts (EBookBackend *backend,
+				  gsize view_id,
+				  guint range_start,
+				  guint range_length)
+{
+	EBookBackendClass *klass;
+
+	g_return_val_if_fail (E_IS_BOOK_BACKEND (backend), NULL);
+
+	klass = E_BOOK_BACKEND_GET_CLASS (backend);
+	g_return_val_if_fail (klass != NULL, NULL);
+	g_return_val_if_fail (klass->impl_dup_view_contacts != NULL, NULL);
+
+	return klass->impl_dup_view_contacts (backend, view_id, range_start, range_length);
 }

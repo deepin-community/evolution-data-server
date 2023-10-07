@@ -163,8 +163,7 @@ camel_imapx_mailbox_new (CamelIMAPXListResponse *response,
 	attributes = camel_imapx_list_response_dup_attributes (response);
 
 	/* The INBOX mailbox is case-insensitive. */
-	if (g_ascii_strcasecmp (name, "INBOX") == 0)
-		name = "INBOX";
+	name = camel_imapx_normalize_inbox_name (name);
 
 	mailbox = g_object_new (CAMEL_TYPE_IMAPX_MAILBOX, NULL);
 	mailbox->priv->name = g_strdup (name);
@@ -207,8 +206,7 @@ camel_imapx_mailbox_clone (CamelIMAPXMailbox *mailbox,
 	g_return_val_if_fail (new_mailbox_name != NULL, NULL);
 
 	/* The INBOX mailbox is case-insensitive. */
-	if (g_ascii_strcasecmp (new_mailbox_name, "INBOX") == 0)
-		new_mailbox_name = "INBOX";
+	new_mailbox_name = camel_imapx_normalize_inbox_name (new_mailbox_name);
 
 	clone = g_object_new (CAMEL_TYPE_IMAPX_MAILBOX, NULL);
 	clone->priv->name = g_strdup (new_mailbox_name);
@@ -796,7 +794,7 @@ camel_imapx_mailbox_set_permanentflags (CamelIMAPXMailbox *mailbox,
  * The returned newly-allocated, %NULL-terminated string array should
  * be freed with g_strfreev() when finished with it.
  *
- * Returns: the last known "QUOTAROOT" value
+ * Returns: (nullable): the last known "QUOTAROOT" value
  *
  * Since: 3.12
  **/
@@ -920,7 +918,7 @@ camel_imapx_mailbox_take_message_map (CamelIMAPXMailbox *mailbox,
  * camel_imapx_mailbox_get_msn_for_uid:
  * @mailbox: a #CamelIMAPXMailbox
  * @uid: a message's unique identifier
- * @out_msn: return location for the message's sequence number, or %NULL
+ * @out_msn: (nullable): return location for the message's sequence number, or %NULL
  *
  * Given a message's unique identifier (@uid), write the message's sequence
  * number to @out_msn and return %TRUE.  If the unique identifier is unknown

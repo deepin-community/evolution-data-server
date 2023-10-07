@@ -1,26 +1,552 @@
-Evolution-Data-Server 3.42.1 2021-10-29
+Evolution-Data-Server 3.50.0 2023-09-15
 ---------------------------------------
 
 Bug Fixes:
-	I#352 - LDAP: Claim capabilities change on "sync for offline" change (Milan Crha)
-	I#355 - Camel: Ignore empty output from "Pipe to program" filter (Milan Crha)
-	I#360 - WebDAVNotes: Recognize and prefer files with .md extension (Milan Crha)
-	I#361 - Camel: Understand non-standard "Content-Transfer-Encoding: uuencode" (Milan Crha)
-	M!81 - Camel-SMTP: accept any 2xx code on MAIL FROM: as success (Дилян Палаузов)
-	evo-I#1621 - Prevent IDN homograph attacks (Milan Crha)
+	I#499 - addressbook-export: Do not translate `--format` arg description
+	I#500 - Disable building tests in CMake
+	M!134 - Fix a typo (begining) in an openldap-extract.h comment (Дилян Палаузов)
+	M!136 - Allow to use the flatpak manifest directly from GNOME Builder (Corentin Noël)
 
 Miscellaneous:
-	LDAP: Fix a memory leak when filling a contact address (Milan Crha)
-	book/cal-backend: Add some safety checks around pending_operations queue (Milan Crha)
-	Correct 'Since:' tag in the developer comments (Milan Crha)
-	ERemindersWidget: Incorrect value for last selected snooze time after open (Milan Crha)
-	Camel: Correct a copy&paste error in a function documentation (Milan Crha)
-	org.gnome.Evolution-alarm-notify.desktop: Add X-GNOME-UsesNotifications=true (Milan Crha)
+	Correct test-cal-backend-sexp expected arguments
+	Add e_util_guess_source_is_readonly() utility function
 
 Translations:
-	Boyuan Yang (zh_CN)
+	Anders Jonsson (sv)
+	Aurimas Černius (lt)
+	Balázs Úr (hu)
+	Daniel Rusek (cs)
+	Jürgen Benvenuti (de)
+	Martin Srebotnjak (sl)
+
+Evolution-Data-Server 3.49.3 2023-09-01
+---------------------------------------
+
+Bug Fixes:
+	I#487 - IMAPx: Messages unexpectedly deleted from Inbox
+	I#491 - docs: Move the gi-docgen documentation to the parent folder (Corentin Noël)
+	I#493 - Use collection source also when it has no auth method set
+	I#497 - IMAP: Cache does not refresh after UIDVALIDITY changes
+	M!128 - reminder-watcher: Default to system set 24-hour format (Melker Narikka)
+	M!129 - docs: Add more dependencies to the gi-docgen generated documentation (Corentin Noël)
+	M!129 - Refine the pkgconfig and .gir dependencies (Corentin Noël)
+	evo-I#1234 - Add "Unset Label" action in filter rules
+	ews-I#241 - OAuth2: Provide detailed error on access token refresh failure
+
+Miscellaneous:
+	libecal: Move some basic utility functions from Evolution
+	build: Do not depend on libsecret-unstable
+	Harmonize `sizeof` keyword use
+	CamelGgpContext: Strip unneeded information from keys on export
+	ECalComponentText: Fix compiler warning from type-check of const object
+
+Translations:
+	Asier Sarasua Garmendia (eu)
+	Jürgen Benvenuti (de)
+	Kukuh Syafaat (id)
+	Piotr Drąg (pl)
+	Sabri Ünal (tr)
+	Sergej A (ru)
+	Yuri Chornoivan (uk)
+
+Evolution-Data-Server 3.49.2 2023-08-04
+---------------------------------------
+
+Bug Fixes:
+	I#59 - CalDAV: Allow to disable schedule reply on remove
+	I#180 - Add option to reduce book/cal data usage when on a metered connection
+	I#221 - CalDAV: Zimbra has incorrect OPTIONS response for shared calendars
+	I#483 - Calendar: Add option to (not) delete "Declined" meeting
+	I#484 - Camel MIME utils: fix aliasing issue in datetok (Enrik Berkhan)
+	I#486 - ECollator: Always include Latin/English letters
+	I#488 - Camel: Filtering Search folder leaves changed messages in the result
+	I#490 - EBookMetaBackend: Changes from refresh() not propagated to the opened views
+	M!125 - ci: Export the documentation with GitLab Pages (Corentin Noël)
+	M!125 - docs: Add gi-docgen based documentation for all the libraries (Corentin Noël)
+	evo-I#375 - Add functions to set and support Autocrypt for mail messages
+	evo-I#609 - Calendar: Use user-configured date format in the editor
+	evo-I#662 - Option to get Delivery Status Notification (DSN)
+	evo-I#1750 - CamelCipherContext: Add a specific error code for missing public key
+
+Miscellaneous:
+	ECalMetaBackend: Error when trying to modify all instances from a detached instance
+	ESoupSession: Setup GSSAPI/NTLM authentication also for insecure connections
+	Calendar: Correct function prototype declarations (-Wenum-int-mismatch)
+	IMAPx: Remove unused argument from imapx_update_message_info_flags()
+	Camel: Add functions related to GPG key import/info
+	IMAPx: Disable "Single client mode" by default
+	Fix a memory leak in EDataBookViewWatcher-s
+	libedata-book: Querying in aux tables fails with an SQLite error
+	libedata-book: Treat "contains" query with empty value as "exists"
+	EDataBookViewWatcher-s: Claim runtime warning when fails to get contacts
+
+Translations:
+	Balázs Úr (hu)
+	Danial Behzadi (fa)
+	Hugo Carvalho (pt)
+	Julia Dronova (ru)
+	Kukuh Syafaat (id)
+	Sergej A (ru)
+	Yuri Chornoivan (uk)
+
+Evolution-Data-Server 3.49.1 2023-06-30
+---------------------------------------
+
+Bug Fixes:
+	I#458 - IMAP: Overriding "[Gmail]" namespace doesn't work
+	I#459 - Camel: POP3's 'UTF8' command blocking login
+	I#461 - backends: React to destination URI changes
+	I#462 - Fails to refresh backend with offline changes and broken local cache state
+	I#465 - camel-cipher-context: Make camel_cipher_validity_get_description() return a const (Chris Talbot)
+	I#468 - Camel: Update developer documentation for camel_cipher_context_encrypt()
+	I#469 - IMAPx: Ignore 'Permission denied' error on refresh
+	I#472 - Camel: Recognize disabled algorithms with S/MIME signatures
+	I#474 - Camel: Set proper S/MIME signature verification status
+	I#475 - EWebDAVSession: Claim also error nodes from propstat response
+	I#477 - Add search folder condition for overdue messages
+	I#478 - IMAP: Cannot remove labels added in Thunderbird
+	I#479 - WebDAV: Fails to discover iCloud address book
+	I#480 - Camel: Learn as Junk filter action not actually running the learn function
+	M!116 - libedataserver: Disable deprecation notice around e_flag_timed_wait (Corentin Noël)
+	M!117 - Replace GTimeVal by GDateTime or int64 (Corentin Noël)
+	M!119 - Calendar: Change file backend discard_alarm() function
+	M!120 - camel: Remove the last use of GTimeVal (Corentin Noël)
+	M!121 - build: Fix WITH_PRIVATE_DOCS hint (Jan Tojnar)
+	M!123 - Camel: Fix PGP test (Chris Talbot)
+	evo-I#1293 - Allow to Search Contact's Phone With Numbers Only
+	evo-I#2345 - Wrong S/MIME certificate selection for encrypted email
+
+Miscellaneous:
+	LDAP: Change how debug prints are printed
+	WebDAV Notes: Fallback to derive component summary from description
+	WebDAV backends: Specify cache file in an error message
+	IMAPX: Add option for "Single client mode"
+	CamelFilterDriver: Unset info's headers only when folder has summary
+	docs: Stop 'evolution-data-server' depend on 'gtkdoc-camel' target
+	DOAP: No more mailing lists on mail.gnome.org (Andre Klapper)
+	Fix a typo in a developer comment
+	e-xml-utils: Add parameter validity check into e_xml_find_children_nodes()
+	CI: Use org.freedesktop.Sdk.Extension.vala in nightly flatpak manifest
+	Contacts: Add "manual query" mode to the book view
+
+Translations:
+	Aleksandr Melman (ru)
+	Alexander Shopov (bg)
+	Asier Sarasua Garmendia (eu)
+	Ekaterine Papava (ka)
+	Fabio Tomat (fur)
+	Hugo Carvalho (pt)
+	Jiri Eischmann (cs)
+	Jordi Mas (ca)
+	Kukuh Syafaat (id)
+	Nathan Follens (nl)
+	Sabri Ünal (tr)
+	Sergej A (ru)
+	Yuri Chornoivan (uk)
+
+Evolution-Data-Server 3.48.0 2023-03-17
+---------------------------------------
+
+Miscellaneous:
+	e-cal-util: Check for duplicate UIDs when generating alarms
+	EReminderWatcher: Ensure correct default timezone set on ECalClient
+	M!115 - ci: Use CCache and store the flatpak-builder cache (Corentin Noël)
+	M!115 - ci: Run the CI for the current commit (Corentin Noël)
+
+Translations:
+	Aleksandr Melman (ru)
+	Ask Hjorth Larsen (da)
+	Bruce Cowan (en_GB)
+	Changwoo Ryu (ko)
+	Chao-Hsiung Liao (zh_TW)
+	Daniel Mustieles (es)
+	Fabio Tomat (fur)
+	Jean-Marc Tissières (fr)
+	Jiri Grönroos (fi)
+	Piotr Drąg (pl)
+	Sabri Ünal (tr)
+
+Evolution-Data-Server 3.47.3 2023-03-03
+---------------------------------------
+
+Bug Fixes:
+	I#276 - alarm-notify: Incorrectly handles changes in recurring events
+	I#453 - build: Make it possible to override C++ standard
+	I#454 - libedataserverui: Tweak lookout of the Trust Prompt dialog
+
+Miscellaneous:
+	OAuth2 credentials prompter: Log what URI is being opened in the WebKitWebView
+
+Translations:
+	Alan Mortensen (da)
+	Anders Jonsson (sv)
+	Asier Sarasua Garmendia (eu)
+	Aurimas Černius (lt)
+	Balázs Úr (hu)
+	Daniel Mustieles (es)
+	Fran Dieguez (gl)
+	Hugo Carvalho (pt)
+	Jürgen Benvenuti (de)
+	Kukuh Syafaat (id)
+	Matej Urbančič (sl)
+	Quentin PAGÈS (oc)
+	Sabri Ünal (tr)
+	Yuri Chornoivan (uk)
+
+Evolution-Data-Server 3.47.2 2023-02-10
+---------------------------------------
+
+Bug Fixes:
+	I#231 - Release unused memory in factories after certain operations
+	I#445 - libedataserverui4: (almost) empty GIR/VAPI file (Corentin Noël)
+	I#446 - IMAP: Inbox hidden in offline with "Show only subscribed folders"
+	I#447 - Google Task modification not synced
+	I#452 - CalDAV: Can fail to refresh content in some cases
+	M!112 - Update for removal of WebKitGTK sandbox API (Michael Catanzaro)
+	M!113 - Don't accidentally disable sandbox for GTK 3 users (Michael Catanzaro)
+	M!114 - OAuth2: stop trying to disable WebKit plugins (Michael Catanzaro)
+	M!114 - OAuth2: use WebKitNetworkSession to manage proxy settings (Michael Catanzaro)
+	evo-I#2161 - Mail: Add 'Learn as Junk' message filter action
+	ews-I#210 - Add option to always use HTTP/1
+
+Miscellaneous:
+	IMAPx: Utilize normalization of the Inbox folder name
+	OAuth2 Credentials Prompter: Allow pasting the whole URL as an authorization code
+	Enable GitLab CI for easier testing of the changes
+	OAuth2: Show errors returned by the server in the prompt window
+	Parse URI strings into GUri in a relaxed mode
+	OAuth2: Extract returned information from URI query or fragment
+	IMAPx: Folder refresh could remove new message from local summary
+
+Translations:
+	Aleksandr Melman (ru)
+	Daniel Mustieles (es)
+	Fran Dieguez (gl)
+	Hugo Carvalho (pt)
+	Jordi Mas i Hernandez (ca)
+	Jürgen Benvenuti (de)
+	Kukuh Syafaat (id)
+	Quentin PAGÈS (oc)
+	Sabri Ünal (tr)
+	Yosef Or Boczko (he)
+	Yuri Chornoivan (uk)
+
+Evolution-Data-Server 3.47.1 2023-01-06
+---------------------------------------
+
+Bug Fixes:
+	I#416 - LDAP: Possible memory leak in build_mods_from_contacts()
+	I#417 - Serialize OAuth2 token refresh for an account
+	I#418 - locale_supports_12_hour_format() can read uninitialized value
+	I#419 - IMAP: Does not forget renamed folders on the server
+	I#420 - LDAP: Use valid values for error paths of contact create/remove
+	I#421 - libedataserver: Enhance two-digit year parsing
+	I#427 - Tautology in e_named_parameters_equal()
+	I#428 - Addressbook: Fix possible read of uninitialized data
+	I#429 - Fix some (rarely) possible dereferences of NULL
+	I#431 - e-xml-utils: Enable parse of huge XML files
+	I#432 - Fix possible NULL-dereference in e_cal_backend_file_modify_objects()
+	I#435 - ECalComponentAttendee: Default CUTYPE is INDIVIDUAL
+	I#437 - IMAP: Excessive memory usage on folder summary download
+	I#438 - Trust Prompt: Add issuer's certificate fingerprint
+	I#439 - Fails to add task with X-EVOLUTION-GTASKS-POSITION into Google Task list
+	I#442 - e_util_change_uri_component: Reset default port when changing scheme
+	I#443 - Camel: Mail header order in malformed message matters
+	M!97 - desktop: Remove obsolete Bugzilla entries (Jake Dane)
+	M!102 - Stored values are never read (Дилян Палаузов)
+	M!106 - Fix few memory leaks (Дилян Палаузов)
+	M!107 - Use webkitgtk-6.0 API version (Michael Catanzaro)
+	M!108 - Try harder to support webkitgtk-6.0 (Michael Catanzaro)
+	M!109 - EGDataSession: Make it available to the GObject introspection (Corentin Noël)
+	M!110 - typos: success, successful (Дилян Палаузов)
+	M!111 - addressbook: Add autocleanups (Corentin Noël)
+	ews-I#208 - Prompting for password too often
+
+Miscellaneous:
+	po: Merge .source files back to the POTFILES.in
+	Handle negative value for GUri's port
+	Stored values are never read (Дилян Палаузов)
+	Fix memory leaks found by clang static analyzer (Дилян Палаузов)
+	EVCard: Slightly speed up vCard parsing and export to text
+	camel-db.c: Rearrange transaction handling (Дилян Палаузов)
+	CamelDB: Fix an uninitialized variable warning
+	build: Add a check for localtime_r()
+	build: Update check for elfutils/libdwfl.h
+	Add EXTENSIONS_DIR compile time option
+	Replace use of g_source_set_name_by_id()
+	Add ECacheKeys helper object for ref-counted data stored in an ECache table
+	Calendar: Extract categories parsing into a utility function
+	Contacts: Add 'categories' backend property with a list of used categories
+	Fix a crash under source_registry_object_added_no_owner()
+	ESoupAuthBearer: Add debug prints
+	IMAPX: Hide complete requests in debug logs for some sensitive commands
+
+Translations:
+	Aleksandr Melman (ru)
+	Asier Sarasua Garmendia (eu)
+	Aurimas Černius (lt)
+	Balázs Úr (hu)
+	Charles Monzat (fr)
+	Christian Kirbach (de)
+	Danial Behzadi (fa)
+	emintufan (tr)
+	Fabio Tomat (fur)
+	Gianvito Cavasoli (it)
+	Goran Vidović (hr)
+	Hugo Carvalho (pt)
+	Martin (sl)
+	Nathan Follens (nl)
+	Rafael Fontenelle (pt_BR)
+	Yuri Chornoivan (uk)
+	Zurab Kargareteli (ka)
 	Мирослав Николић (sr)
+
+Evolution-Data-Server 3.46.0 2022-09-16
+---------------------------------------
+
+Translations:
+	Piotr Drąg (pl)
+	muzena (hr)
+	Balázs Úr (hu)
+	Anders Jonsson (sv)
+	Fran Dieguez (gl)
+
+Evolution-Data-Server 3.45.3 2022-09-02
+---------------------------------------
+
+Bug Fixes:
+	I#413 - Camel: VACUUM cannot run from within a transaction
+	M!96 - e-cal-component.c: typo VTOTO -> VTODO (Дилян Палаузов)
+
+Miscellaneous:
+	build: Correct use of manual NSS/NSPR build flags
+	libedataserverui: Add a widget to show certificate information
+	Replace GcrCertificateWidget with libedataserverui's ECertificateWidget
+
+Evolution-Data-Server 3.45.2 2022-08-05
+---------------------------------------
+
+Bug Fixes:
+	I#351 - LDAP: Conditionally use displayName for file-as
+	I#402 - IMAPx: Unsubscribed folders in personal namespace hidden in offline
+	I#404 - ESoupSession: Remember server fail response for detailed error
+	I#405 - ECalClient: Remove libical errors from components on write
+	I#407 - IMAPx: Unsubscribed folder always removed from the UI
+	evo-I#1958 - reminders-widget: Sort snooze times by duration
+
+Miscellaneous:
+	Bump libsoup minimum version requirement to 3.1.1
+	CamelDataWrapper: Add function to construct it from data
+	ESourceMailAccount: Add 'builtin' property
+	Add functions to manipulate Google Task API
+	e_soup_session_util_normalize_uri_path: Normalize path only when not encoded
+	Replace libgdata dependency with built-in functions
+	Add camel_folder_get_full_display_name()
+	CamelFolderSummary: Hide empty email address in user visible strings
+	Calendar: Correct handling of a "not modified" On The Web calendar
+	ESoupSession: Extract common auth failure code into a utility function
+	ESoupAuthBearer: Check for token expiration in e_soup_auth_bearer_is_authenticated()
+	EOAuth2Service: Correct free function for GBytes structure
+	ESoupSession: Allow NULL source internally
+	Check for non-zero value passed to g_flags_get_first_value()
+	alarm-notify: Use themed icon instead of file icon for notifications
+	ESoupSession: Avoid downgrade of Bearer (OAuth2) auth for authentication
+
+Evolution-Data-Server 3.45.1 2022-07-01
+---------------------------------------
+
+ * The Evolution-Data-Server had been ported to libsoup3, which
+   means anything what uses it, and all of its dependencies, should
+   be libsoup3 too.
+
+Bug Fixes:
+	I#39 - Add Web Key Directory (WKD) support for OpenPGP
+	I#234 - EReminderWatcher: Auto-remove old reminders
+	I#350 - LDAP: Conditionally use 'description' as Note
+	I#359 - CalDAV: Crash on calendar update
+	I#379 - OAuth2: Option to use browser of choice for authentication
+	I#380 - CalDAV: Free / Busy not working with Nextcloud
+	I#381 - EWebDAVSession: Correct extract of href from Location header
+	I#383 - Add option to respect Power Saver mode
+	I#386 - e-webdav-discover: Fails to find Radicale calendars within collection account
+	I#388 - Google OAuth out-of-band (oob) flow will be deprecated
+	I#389 - IMAPx: Fails to create folder with NIL folder hierarchy delimiter
+	I#390 - Camel: Give more precise error on failed message encryption
+	I#391 - Tests fail with libphonenumber 8.12.49
+	I#392 - Sanitize IPv6 proxy address before passing it to WebKitGTK
+	I#393 - Calendar: Correct UNTIL recurrence with midnight start
+	I#396 - Camel: Read message ID-s with multiple `@`
+	M!80 - Provide libedataserverui for gtk4
+	M!85 - Port to libsoup3
+	M!91 - CamelStoreSummary: Make CamelStoreInfo a boxed class (Corentin Noël)
+	evo-I#1026 - alarm-notify: Add option to enable/disable desktop notifications
+	evo-I#1348 - WebDAVCollectionBackend: Removes sources on server error
+
+Miscellaneous:
+	Change how OAuth2 credentials are stored in the code
+	ESoupAuthBearer: Implement two more SoupAuth virtual methods
+	ERemindersWidget: Allow width shrink for small screens
+	e-module: Add debug prints about module loading
+	Fix few memory leaks discovered by Coverity scan
+	goa-ews: Handle certificate errors during autodiscover
+	GOA module: Prevent ESource removal on D-Bus reconnect or registry reload
+	EExtensible: Introduce e_extensible_reload_extensions()
+	EDataFactory: Reload extensions on factory start
+	Disable hardware acceleration for WebKitGTK
+	book/cal-meta-backend: Claim error on refresh call in Power Saver mode
+	Calendar: Add functions to handle LANGUAGE parameter on properties
+	e-cal-component: Fix a logic flaw in the foreach_property()
+	alarm-notify: Use localized summary/description properties, if available
+	build: Look for WebKitGTK only when GTK/GTK4 is enabled
+	Correct libedataserverui4 main header file
+	ECredentialsPrompterImplPassword: Dialog not closed on OK/Cancel click in gtk3
+	ESoupSession: Change handling of credentials
+	ESource: Reconnect signal handlers when the D-Bus 'source' interface changes
+	Camel: Add 'Advanced Options' section to provider configuration
+	IMAPx: Expose store-changes-interval in Advanced Options
+	build: Disable libgdata dependency by default and check its soupapiversion
+
+Translations:
+	Fran Dieguez (gl)
+	Danial Behzadi (fa)
+	Daniel Mustieles (es)
+
+Evolution-Data-Server 3.44.0 2022-03-18
+---------------------------------------
+
+Translations:
+	Ask Hjorth Larsen (da)
+	Balázs Úr (hu)
+	emintufan (tr)
+	Jordi Mas (ca)
+	Piotr Drąg (pl)
+
+Evolution-Data-Server 3.43.3 2022-03-04
+---------------------------------------
+
+Bug Fixes:
+	I#377 - Camel: Use contact certificate unconditionally in S/MIME encryption
+	I#378 - Camel: Spool auto-refresh too aggressive
+	M!92 - CamelStoreSummary: Fix ref/unref annotations (Corentin Noël)
+	M!93 - Port to libgweather4 (Javier Jardón)
+
+Miscellaneous:
+	Camel: Thaw frozen folders on failed Maildir message transfer
+	CamelFolderSummary: Re-enable notifications on message info in summary_assign_uid()
+
+Translations:
+	Asier Sarasua Garmendia (eu)
+	Changwoo Ryu (ko)
+	Dušan Kazik (sk)
+	Emin Tufan Çetin (tr)
+	Goran Vidović (hr)
+	Jordi Mas i Hernandez (ca)
+	Luna Jernberg (sv)
+	Quentin PAGÈS (oc)
+
+Evolution-Data-Server 3.43.2 2022-02-11
+---------------------------------------
+
+Bug Fixes:
+	I#369 - IMAPx: Add an option to send client 'ID' during login phase (z-z-zoey)
+	I#372 - SMTP: Add option to not re-encode message on upload
+	I#374 - LDAP: Let open when server is offline and marked for offline work
+	M!79 - Add nullable annotations into developer documentation (Michael McClurg)
+
+Miscellaneous:
+	IMAPx: Avoid creating NOSELECT CamelFolder-s
+	CamelMimeFilterCRLF: Correct encoding part of the filter
+	CamelMimeParser: Correct body content parse when CRLF is used
+	Provide database file name in SQLITE_CORRUPT error message
+	camel-net-utils: Allow NULL string arguments in IDNA/ASCII functions
+
+Translations:
+	Aleksandr Melman (ru)
+	Aurimas Černius (lt)
+	Boyuan Yang (zh_CN)
+	Daniel Mustieles (es)
+	Fran Dieguez (gl)
+	Hugo Carvalho (pt)
+	Kukuh Syafaat (id)
+	Leônidas Araújo (pt_BR)
+	Luming Zh (zh_CN)
+	Marek Černocký (cs)
+	Matej Urbančič (sl)
+	Matheus Barbosa (pt_BR)
+	Quentin PAGÈS (oc)
+	Yuri Chornoivan (uk)
+
+Evolution-Data-Server 3.43.1.1 2022-01-07
+-----------------------------------------
+
+Miscellaneous:
+	Correct install of the translation files (Corentin Noël)
+
+Evolution-Data-Server 3.43.1 2022-01-07
+---------------------------------------
+
+Bug Fixes:
+	I#352 - LDAP: Claim capabilities change on "sync for offline" change
+	I#354 - LDAP: Listen for ESource changes
+	I#355 - Camel: Ignore empty output from "Pipe to program" filter
+	I#356 - LDAP: Consume departmentNumber
+	I#360 - WebDAVNotes: Recognize and prefer files with .md extension
+	I#361 - Camel: Understand non-standard "Content-Transfer-Encoding: uuencode"
+	I#364 - Camel: Add a missing header include into camel-hostname-utils.c
+	I#365 - Calendar: Crash on local calandar file change
+	I#366 - Calendar: Correct 'occur-in-time-range?' for zero-length events
+	I#368 - Calendar: X-EVOLUTION-ENDDATE can be calculated incorrectly
+	I#371 - e-cal-util: Fix timezone clamp with DUE date only
+	M!76 - Fixups (Span->Spam, Eventually->Possibly) in a translatable string (Anders Jonsson)
+	M!78 - Remove dependency on intltool (Corentin Noël)
+	M!81 - Camel-SMTP: accept any 2xx code on MAIL FROM: as success (Дилян Палаузов)
+	M!83 - Adjust .pc file not to expose used crypto library (Alexander Traud)
+	M!84 - Correct typos of doesnt/dont (Дилян Палаузов)
+	M!87 - Typo cvs2vcard -> csv2vcard (Дилян Палаузов)
+	M!88 - Camel: Add missing nullable annotations to Medium and MimePart (Corentin Noël)
+	evo-I#1032 - alarm-notify: Add a way to disable sound notifications
+	evo-I#1621 - Prevent IDN homograph attacks
+	evo-I#1639 - Filter messages by condition if sender is in address book
+	evo-I#1645 - Tasks: Support ESTIMATED-DURATION
+	evo-I#1698 - Bundle legacy icons removed from adwaita-icon-theme
+
+Miscellaneous:
+	LDAP: Fix a memory leak when filling a contact address
+	book/cal-backend: Add some safety checks around pending_operations queue
+	Use `g_assert_true()` instead of `g_assert()` in the unit tests
+	ERemindersWidget: Incorrect value for last selected snooze time after open
+	Camel: Correct a copy&paste error in a function documentation
+	org.gnome.Evolution-alarm-notify.desktop: Add X-GNOME-UsesNotifications=true
+	Install legacy icons into correct directory
+	LDAP: Some property changes do not update local cache properly
+	secret-monitor: Turn runtime warnings into debug prints
+	Camel: Use the same charset in all RFC2047-encoded words
+	WebDAVNotes: Let the user choose which extension is used for new notes
+	_libedataserverui_init_icon_theme: Test whether default GdkScreen exists
+	camel-docs.sgml.in: Add camel-hostname-utils documentation
+	e-cal-client: Correct non-NULL check in e_cal_client_create_objects_sync()
+	Calendar: Adapt to libical 3.0.12 change
+	ECalComponent: Add safety checks on get/set of DTEND/DUE properties
+
+Translations:
+	Alan Mortensen (da)
+	Aleksandr Melman (ru)
+	Aurimas Černius (lt)
+	Boyuan Yang (zh)
+	Boyuan Yang (zh_CN)
+	Christian Kirbach (de)
+	Daniel Mustieles (es)
+	Fabio Tomat (fur)
+	Fran Dieguez (gl)
+	Gianvito Cavasoli (it)
+	Goran Vidović (hr)
+	Hugo Carvalho (pt)
+	Jordi Mas i Hernandez (ca)
+	Kukuh Syafaat (id)
+	Quentin PAGÈS (oc)
 	Rūdolfs Mazurs (lv)
+	Yuri Chornoivan (uk)
+	Мирослав Николић (sr)
 
 Evolution-Data-Server 3.42.0 2021-09-17
 ---------------------------------------

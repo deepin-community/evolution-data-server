@@ -1145,8 +1145,8 @@ e_credentials_prompter_class_init (ECredentialsPrompterClass *class)
 	 * window for it. If the result of the call is %NULL, then it tries
 	 * to get the window from the default GtkApplication.
 	 *
-	 * Returns: (transfer none): a #GtkWindow, to be used as a dialog parent,
-	 * or %NULL.
+	 * Returns: (transfer none) (nullable): a #GtkWindow, to be used as a
+	 * dialog parent, or %NULL.
 	 *
 	 * Since: 3.16
 	 **/
@@ -1167,8 +1167,8 @@ e_credentials_prompter_class_init (ECredentialsPrompterClass *class)
 	 * window for it. If the result of the call is %NULL, then it tries
 	 * to get the window from the default GtkApplication.
 	 *
-	 * Returns: (transfer none): a #GtkWindow, to be used as a dialog parent,
-	 * or %NULL.
+	 * Returns: (transfer none) (nullable): a #GtkWindow, to be used as a
+	 * dialog parent, or %NULL.
 	 *
 	 * Since: 3.42
 	 **/
@@ -1401,7 +1401,8 @@ credentials_prompter_guess_dialog_parent (ECredentialsPrompter *prompter)
  * registered or the current callbacks don't have any suitable window, then there's
  * chosen the last active window from the default GApplication, if any available.
  *
- * Returns: (transfer none): a #GtkWindow, to be used as a dialog parent, or %NULL.
+ * Returns: (transfer none) (nullable): a #GtkWindow, to be used as a dialog parent,
+ *    or %NULL.
  *
  * Since: 3.16
  **/
@@ -1433,7 +1434,8 @@ e_credentials_prompter_get_dialog_parent (ECredentialsPrompter *prompter)
  * window, then there's chosen the last active window from the default GApplication,
  * if any available.
  *
- * Returns: (transfer none): a #GtkWindow, to be used as a dialog parent, or %NULL.
+ * Returns: (transfer none) (nullable): a #GtkWindow, to be used as a dialog parent,
+ *    or %NULL.
  *
  * Since: 3.42
  **/
@@ -1901,7 +1903,7 @@ credentials_prompter_prompt_sync (ECredentialsPrompter *prompter,
  *    successfully or unsuccessfully. The function can be called from any
  *    thread, though a dedicated thread is preferred.
  *
- * Returns: %TRUE, when the credentials were provided sucessfully and they
+ * Returns: %TRUE, when the credentials were provided successfully and they
  *   can be used to authenticate the @source; %FALSE otherwise.
  *
  * Since: 3.16

@@ -18,11 +18,9 @@
 #ifndef TRUST_PROMPT_H
 #define TRUST_PROMPT_H
 
-/* XXX Yeah, yeah... */
-#define GCR_API_SUBJECT_TO_CHANGE
-
-#include <gcr/gcr.h>
 #include <libebackend/libebackend.h>
+
+G_BEGIN_DECLS
 
 /* This shows a trust-prompt. The function may not block and returns whether
  * showed a dialog or not. It calls e_user_prompter_server_extension_response()
@@ -39,7 +37,9 @@ trust_prompt_show (EUserPrompterServerExtension *extension,
 		   gint prompt_id,
 		   const gchar *host,
 		   const gchar *markup,
-		   GcrParsed *parsed,
+		   const gchar *base64_certificate_der,
 		   const gchar *reason);
+
+G_END_DECLS
 
 #endif /* TRUST_PROMPT_H */

@@ -26,6 +26,9 @@ set(SOURCES
 	e-data-book-direct.c
 	e-data-book-factory.c
 	e-data-book-view.c
+	e-data-book-view-watcher-cache.c
+	e-data-book-view-watcher-memory.c
+	e-data-book-view-watcher-sqlite.c
 	e-subprocess-book-factory.c
 	e-system-locale-watcher.c
 	ximian-vcard.h
@@ -43,13 +46,16 @@ set(HEADERS
 	e-book-cache.h
 	e-book-meta-backend.h
 	e-book-sqlite.h
-	e-data-book-factory.h
-	e-data-book-view.h
 	e-data-book.h
 	e-data-book-cursor.h
 	e-data-book-cursor-cache.h
 	e-data-book-cursor-sqlite.h
 	e-data-book-direct.h
+	e-data-book-factory.h
+	e-data-book-view.h
+	e-data-book-view-watcher-cache.h
+	e-data-book-view-watcher-memory.h
+	e-data-book-view-watcher-sqlite.h
 	e-subprocess-book-factory.h
 	e-system-locale-watcher.h
 )
@@ -203,7 +209,7 @@ install(TARGETS evolution-addressbook-factory-subprocess
 
 set(gir_sources ${SOURCES} ${HEADERS})
 set(gir_identifies_prefixes E)
-set(gir_includes GObject-2.0 GLib-2.0 Gio-2.0 libxml2-2.0)
+set(gir_includes GObject-2.0 GLib-2.0 Gio-2.0)
 set(gir_cflags
 	-DLIBEDATA_BOOK_COMPILATION
 	-DEDS_DISABLE_DEPRECATED=1

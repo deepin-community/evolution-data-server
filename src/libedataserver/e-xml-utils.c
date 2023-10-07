@@ -70,7 +70,7 @@ e_xml_initialize_in_main (void)
  * structure.  If the XML file cannot be read or its contents are malformed,
  * the function returns %NULL.
  *
- * Returns: (transfer full): an XML document structure, or %NULL
+ * Returns: (transfer full) (nullable): an XML document structure, or %NULL
  **/
 xmlDoc *
 e_xml_parse_file (const gchar *filename)
@@ -222,7 +222,7 @@ e_xml_parse_data (gconstpointer data,
 	g_return_val_if_fail (data != NULL, NULL);
 	g_return_val_if_fail (length > 0, NULL);
 
-	return xmlReadMemory (data, length, "data.xml", NULL, XML_PARSE_NOWARNING | XML_PARSE_RECOVER);
+	return xmlReadMemory (data, length, "data.xml", NULL, XML_PARSE_NOWARNING | XML_PARSE_RECOVER | XML_PARSE_HUGE | XML_PARSE_NONET);
 }
 
 /**
@@ -758,6 +758,7 @@ e_xml_find_children_nodes (xmlNode *parent,
 	xmlNode *node;
 	guint ii;
 
+	g_return_if_fail (parent != NULL);
 	g_return_if_fail (count > 0);
 
 	data = g_alloca (sizeof (struct _data) * count);

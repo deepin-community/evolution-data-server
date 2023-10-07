@@ -221,6 +221,41 @@ G_BEGIN_DECLS
 
 #define E_CAL_STATIC_CAPABILITY_SIMPLE_MEMO_WITH_SUMMARY "simple-memo-with-summary"
 
+/**
+ * E_CAL_STATIC_CAPABILITY_TASK_ESTIMATED_DURATION:
+ *
+ * Set, when the backend supports ESTIMATED-DURATION property for tasks.
+ *
+ * Since: 3.44
+ **/
+
+#define E_CAL_STATIC_CAPABILITY_TASK_ESTIMATED_DURATION "task-estimated-duration"
+
+/**
+ * E_CAL_STATIC_CAPABILITY_ITIP_SUPPRESS_ON_REMOVE_SUPPORTED:
+ *
+ * Set, when the backend supports %E_CAL_STATIC_CAPABILITY_SAVE_SCHEDULES and
+ * it can suppress iTip message on component removal. The capability should
+ * be ignored when the %E_CAL_STATIC_CAPABILITY_SAVE_SCHEDULES is not present.
+ *
+ * The backend checks %E_CAL_OPERATION_FLAG_DISABLE_ITIP_MESSAGE flag when these
+ * capabilities are present and sends or does not send iTip message accordingly.
+ *
+ * Since: 3.50
+ **/
+#define E_CAL_STATIC_CAPABILITY_ITIP_SUPPRESS_ON_REMOVE_SUPPORTED "itip-suppress-on-remove-supported"
+
+/**
+ * E_CAL_STATIC_CAPABILITY_RETRACT_SUPPORTED:
+ *
+ * Set, when the backend supports retract. That's a way to ask for a meeting
+ * deletion with a comment, which is stored in a component as
+ * X-EVOLUTION-RETRACT-COMMENT property.
+ *
+ * Since: 3.50
+ **/
+#define E_CAL_STATIC_CAPABILITY_RETRACT_SUPPORTED "retract-supported"
+
 struct _ECalClient;
 
 ICalComponent *	e_cal_util_new_top_level	(void);
@@ -230,6 +265,13 @@ ICalTimezone *	e_cal_util_copy_timezone	(const ICalTimezone *zone);
 ICalComponent *	e_cal_util_parse_ics_string	(const gchar *string);
 ICalComponent *	e_cal_util_parse_ics_file	(const gchar *filename);
 
+gboolean	e_cal_util_has_alarms_in_range	(ECalComponent *comp,
+						 time_t start,
+						 time_t end,
+						 ECalComponentAlarmAction *omit,
+						 ECalRecurResolveTimezoneCb resolve_tzid,
+						 gpointer user_data,
+						 ICalTimezone *default_timezone);
 ECalComponentAlarms *
 		e_cal_util_generate_alarms_for_comp
 						(ECalComponent *comp,
@@ -248,7 +290,18 @@ gint		e_cal_util_generate_alarms_for_list
 						 ECalRecurResolveTimezoneCb resolve_tzid,
 						 gpointer user_data,
 						 ICalTimezone *default_timezone);
-
+ECalComponentAlarms *
+		e_cal_util_generate_alarms_for_uid_sync
+						(struct _ECalClient *client,
+						 const gchar *uid,
+						 time_t start,
+						 time_t end,
+						 ECalComponentAlarmAction *omit,
+						 ECalRecurResolveTimezoneCb resolve_tzid,
+						 gpointer user_data,
+						 ICalTimezone *default_timezone,
+						 GCancellable *cancellable,
+						 GError **error);
 const gchar *	e_cal_util_priority_to_string	(gint priority);
 gint		e_cal_util_priority_from_string	(const gchar *string);
 
@@ -368,6 +421,48 @@ void		e_cal_util_clamp_vtimezone	(ICalComponent *vtimezone,
 void		e_cal_util_clamp_vtimezone_by_component
 						(ICalComponent *vtimezone,
 						 ICalComponent *component);
+ICalProperty *	e_cal_util_component_find_property_for_locale
+						(ICalComponent *icalcomp,
+						 ICalPropertyKind prop_kind,
+						 const gchar *locale);
+/**
+ * ECalUtilForeachCategoryFunc:
+ * @comp: an #ICalComponent
+ * @inout_category: (inout): the category name
+ * @user_data: user data for the callback
+ *
+ * Function called for each non-empty category from e_cal_util_foreach_category().
+ * The @func can assume owenrship of the @inout_category content, in which case
+ * it should also set its content to %NULL, to avoid free of it. The string itself,
+ * if taken, should be freed with g_free(), when no longer needed.
+ *
+ * Returns: %TRUE to continue, %FALSE to stop
+ *
+ * Since: 3.48
+ **/
+typedef gboolean (* ECalUtilForeachCategoryFunc)(ICalComponent *comp,
+						 gchar **inout_category,
+						 gpointer user_data);
+
+void		e_cal_util_foreach_category	(ICalComponent *comp,
+						 ECalUtilForeachCategoryFunc func,
+						 gpointer user_data);
+void		e_cal_util_diff_categories	(ICalComponent *old_comp,
+						 ICalComponent *new_comp,
+						 GHashTable **out_added, /* const gchar *category ~> 1 */
+						 GHashTable **out_removed); /* const gchar *category ~> 1 */
+
+const gchar *	e_cal_util_strip_mailto		(const gchar *address);
+gboolean	e_cal_util_email_addresses_equal(const gchar *email1,
+						 const gchar *email2);
+gboolean	e_cal_util_get_default_name_and_address
+						(ESourceRegistry *registry,
+						 gchar **out_name,
+						 gchar **out_address);
+const gchar *	e_cal_util_get_organizer_email	(const ECalComponentOrganizer *organizer);
+const gchar *	e_cal_util_get_attendee_email	(const ECalComponentAttendee *attendee);
+const gchar *	e_cal_util_get_property_email	(ICalProperty *prop);
+
 
 G_END_DECLS
 

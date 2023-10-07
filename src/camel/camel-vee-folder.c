@@ -733,6 +733,7 @@ camel_vee_folder_propagate_skipped_changes (CamelVeeFolder *vf)
 	CamelFolderChangeInfo *changes = NULL;
 	GHashTableIter iter;
 	gpointer psub, pchanges;
+	GList *subfolders, *link;
 
 	g_return_if_fail (CAMEL_IS_VEE_FOLDER (vf));
 
@@ -805,6 +806,18 @@ camel_vee_folder_propagate_skipped_changes (CamelVeeFolder *vf)
 			camel_folder_changed (CAMEL_FOLDER (vf), changes);
 		camel_folder_change_info_free (changes);
 	}
+
+	/* Update also virtual subfolders, to not have leftover messages in the list */
+	subfolders = camel_vee_folder_ref_folders (vf);
+
+	for (link = subfolders; link; link = g_list_next (link)) {
+		CamelFolder *folder = link->data;
+
+		if (CAMEL_IS_VEE_FOLDER (folder))
+			camel_vee_folder_propagate_skipped_changes (CAMEL_VEE_FOLDER (folder));
+	}
+
+	g_list_free_full (subfolders, g_object_unref);
 }
 
 static guint32
@@ -1319,7 +1332,7 @@ vee_folder_get_message_sync (CamelFolder *folder,
 			   meant as an absolute identification of the folder. */
 			_("No such message %s in “%s : %s”"), uid,
 			camel_service_get_display_name (CAMEL_SERVICE (camel_folder_get_parent_store (folder))),
-			camel_folder_get_full_name (folder));
+			camel_folder_get_full_display_name (folder));
 	}
 
 	return msg;
@@ -1582,7 +1595,7 @@ vee_folder_folder_changed (CamelVeeFolder *vee_folder,
 	if (!vee_folder->priv->change_queue_busy) {
 		gchar *description;
 
-		description = g_strdup_printf (_("Updating search folder “%s”"), camel_folder_get_full_name (CAMEL_FOLDER (vee_folder)));
+		description = g_strdup_printf (_("Updating search folder “%s”"), camel_folder_get_full_display_name (CAMEL_FOLDER (vee_folder)));
 
 		camel_session_submit_job (
 			session, description, (CamelSessionCallback)

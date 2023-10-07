@@ -392,13 +392,13 @@ get_revision_property (ECalBackendFile *cbfile)
 static gchar *
 make_revision_string (ECalBackendFile *cbfile)
 {
-	GTimeVal timeval;
+	GDateTime *dt;
 	gchar   *datestr;
 	gchar   *revision;
 
-	g_get_current_time (&timeval);
-
-	datestr = g_time_val_to_iso8601 (&timeval);
+	dt = g_date_time_new_now_utc ();
+	datestr = g_date_time_format_iso8601 (dt);
+	g_date_time_unref (dt);
 	revision = g_strdup_printf ("%s(%d)", datestr, cbfile->priv->revision_counter++);
 
 	g_free (datestr);
@@ -468,6 +468,7 @@ e_cal_backend_file_get_backend_property (ECalBackend *backend,
 			E_CAL_STATIC_CAPABILITY_ALARM_DESCRIPTION,
 			E_CAL_STATIC_CAPABILITY_TASK_CAN_RECUR,
 			E_CAL_STATIC_CAPABILITY_COMPONENT_COLOR,
+			E_CAL_STATIC_CAPABILITY_TASK_ESTIMATED_DURATION,
 			NULL);
 
 	} else if (g_str_equal (prop_name, E_CAL_BACKEND_PROPERTY_CAL_EMAIL_ADDRESS) ||
@@ -904,6 +905,7 @@ scan_vcalendar (ECalBackendFile *cbfile)
 			if (e_cal_component_set_icalcomponent (comp, icomp)) {
 				/* Thus it's not freed while being used in the 'comp' */
 				g_object_ref (icomp);
+				i_cal_object_set_owner (I_CAL_OBJECT (icomp), G_OBJECT (priv->vcalendar));
 
 				check_dup_uid (cbfile, comp);
 
@@ -1492,7 +1494,7 @@ e_cal_backend_file_open (ECalBackendSync *backend,
 	e_source_set_connection_status (e_backend_get_source (E_BACKEND (backend)),
 		E_SOURCE_CONNECTION_STATUS_CONNECTED);
 
-	/* Claim a succesful open if we are already open */
+	/* Claim a successful open if we are already open */
 	if (priv->path && priv->comp_uid_hash) {
 		/* Success */
 		goto done;
@@ -2698,7 +2700,7 @@ e_cal_backend_file_modify_objects (ECalBackendSync *backend,
 				obj_data->recurrences_list = g_list_remove (obj_data->recurrences_list, recurrence);
 				g_hash_table_remove (obj_data->recurrences, rid);
 			} else {
-				if (*old_components)
+				if (old_components)
 					*old_components = g_slist_prepend (*old_components, obj_data->full_object ? e_cal_component_clone (obj_data->full_object) : NULL);
 			}
 
@@ -2886,17 +2888,10 @@ e_cal_backend_file_discard_alarm_sync (ECalBackendSync *backend,
 		if (comp) {
 			g_object_ref (comp);
 		} else if (obj_data->full_object) {
-			ICalComponent *icomp;
-			ICalTime *itt;
-
-			itt = i_cal_time_new_from_string (rid);
-			icomp = e_cal_util_construct_instance (
-				e_cal_component_get_icalcomponent (obj_data->full_object),
-				itt);
-			g_object_unref (itt);
-
-			if (icomp)
-				comp = e_cal_component_new_from_icalcomponent (icomp);
+			/* if there's no detached instance, modify the main component without
+			   creating a new detached instance only for the acknowledge date/time */
+			comp = g_object_ref (obj_data->full_object);
+			rid = NULL;
 		}
 	} else if (obj_data->full_object) {
 		comp = g_object_ref (obj_data->full_object);
@@ -2934,10 +2929,10 @@ e_cal_backend_file_discard_alarm_sync (ECalBackendSync *backend,
  *         TODO: E_CAL_OBJ_MOD_ONLY_THIS
  * @uid    pointer to UID which must remain valid even if the object gets
  *         removed
- * @rid    NULL, "", or non-empty string when manipulating a specific recurrence;
- *         also must remain valid
- * @error  may be NULL if caller is not interested in errors
- * @return modified object or NULL if it got removed
+ * @rid:   (nullable): %NULL, "", or non-empty string when manipulating a
+ *         specific recurrence; also must remain valid
+ * @error  may be %NULL if caller is not interested in errors
+ * @return: (nullable): modified object or %NULL if it got removed
  */
 static ECalBackendFileObject *
 remove_instance (ECalBackendFile *cbfile,
@@ -3636,7 +3631,7 @@ e_cal_backend_file_receive_objects (ECalBackendSync *backend,
 		const gchar *uid;
 		gchar *rid;
 		ECalBackendFileObject *obj_data;
-		gboolean is_declined;
+		gboolean is_declined, can_delete = TRUE;
 
 		subcomp = link->data;
 
@@ -3684,8 +3679,16 @@ e_cal_backend_file_receive_objects (ECalBackendSync *backend,
 		case I_CAL_METHOD_REPLY:
 			is_declined = e_cal_backend_user_declined (registry, subcomp);
 
+			if (is_declined) {
+				GSettings *settings;
+
+				settings = g_settings_new ("org.gnome.evolution-data-server.calendar");
+				can_delete = g_settings_get_boolean (settings, "delete-meeting-on-decline");
+				g_clear_object (&settings);
+			}
+
 			/* handle attachments */
-			if (!is_declined && e_cal_component_has_attachments (comp))
+			if ((!is_declined || !can_delete) && e_cal_component_has_attachments (comp))
 				fetch_attachments (backend, comp);
 			obj_data = g_hash_table_lookup (priv->comp_uid_hash, uid);
 			if (obj_data) {
@@ -3706,13 +3709,13 @@ e_cal_backend_file_receive_objects (ECalBackendSync *backend,
 					remove_component (cbfile, uid, obj_data);
 				}
 
-				if (!is_declined)
+				if (!is_declined || !can_delete)
 					add_component (cbfile, comp, FALSE);
 
-				if (!is_declined)
+				if (!is_declined || !can_delete) {
 					e_cal_backend_notify_component_modified (E_CAL_BACKEND (backend),
 										 old_component, comp);
-				else {
+				} else {
 					ECalComponentId *id = e_cal_component_get_id (comp);
 
 					e_cal_backend_notify_component_removed (E_CAL_BACKEND (backend),

@@ -21,13 +21,12 @@
 
 #include <glib.h>
 #include <glib/gi18n-lib.h>
-
-#define GCR_API_SUBJECT_TO_CHANGE
-#include <gcr/gcr.h>
-#undef GCR_API_SUBJECT_TO_CHANGE
+#include <gtk/gtk.h>
 
 #include "camel/camel.h"
 #include "libedataserver/libedataserver.h"
+#include "libedataserverui-private.h"
+#include "e-certificate-widget.h"
 
 #include "e-trust-prompt.h"
 
@@ -56,13 +55,22 @@ trust_prompt_add_info_line (GtkGrid *grid,
 	pango_attr_list_insert (bold, attr);
 
 	widget = gtk_label_new (label_text);
+#if GTK_CHECK_VERSION(4, 0, 0)
+	g_object_set (
+		G_OBJECT (widget),
+		"halign", GTK_ALIGN_START,
+		"valign", GTK_ALIGN_START,
+		"xalign", 0.0,
+		"yalign", 0.0,
+		NULL);
+#else
 	gtk_misc_set_padding (GTK_MISC (widget), 0, 0);
 	gtk_misc_set_alignment (GTK_MISC (widget), 0.0, 0.0);
+#endif
 
 	gtk_grid_attach (grid, widget, 1, *at_row, 1, 1);
 
 	widget = gtk_label_new (value_text);
-	gtk_label_set_line_wrap (GTK_LABEL (widget), wrap);
 	g_object_set (
 		G_OBJECT (widget),
 		"hexpand", TRUE,
@@ -75,6 +83,7 @@ trust_prompt_add_info_line (GtkGrid *grid,
 		"max-width-chars", 80,
 		"xalign", 0.0,
 		"yalign", 0.0,
+		"wrap", wrap,
 		NULL);
 
 	gtk_grid_attach (grid, widget, 2, *at_row, 1, 1);
@@ -90,21 +99,18 @@ trust_prompt_show (GtkWindow *parent,
 		   const gchar *source_display_name,
 		   const gchar *host,
 		   const gchar *error_text,
-		   GcrParsed *parsed,
+		   const gchar *certificate_pem,
 		   const gchar *reason,
 		   void (* dialog_ready_cb) (GtkDialog *dialog, gpointer user_data),
 		   gpointer user_data)
 {
 	ETrustPromptResponse response;
-	GcrCertificateWidget *certificate_widget;
-	GcrCertificate *certificate;
-	GckAttributes *attributes;
 	GtkWidget *dialog, *widget;
 	GtkGrid *grid;
-	const guchar *data;
 	gchar *bhost, *tmp;
-	gsize length;
 	gint row = 0;
+
+	_libedataserverui_init_icon_theme ();
 
 	dialog = gtk_dialog_new_with_buttons (
 		_("Certificate trust..."), parent, GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
@@ -114,9 +120,26 @@ trust_prompt_show (GtkWindow *parent,
 		_("_Accept Permanently"), GTK_RESPONSE_ACCEPT,
 		NULL);
 
+	widget = gtk_dialog_get_widget_for_response (GTK_DIALOG (dialog), GTK_RESPONSE_CANCEL);
+	gtk_widget_set_tooltip_text (widget, _("Temporarily reject the certificate"));
+
+	widget = gtk_dialog_get_widget_for_response (GTK_DIALOG (dialog), GTK_RESPONSE_REJECT);
+	gtk_widget_set_tooltip_text (widget, _("Permanently reject the certificate"));
+
+	widget = gtk_dialog_get_widget_for_response (GTK_DIALOG (dialog), GTK_RESPONSE_YES);
+	gtk_widget_set_tooltip_text (widget, _("Temporarily accept the certificate"));
+
+	widget = gtk_dialog_get_widget_for_response (GTK_DIALOG (dialog), GTK_RESPONSE_ACCEPT);
+	gtk_widget_set_tooltip_text (widget, _("Permanently accept the certificate"));
+
 	widget = gtk_dialog_get_content_area (GTK_DIALOG (dialog));
 
-	gtk_container_set_border_width (GTK_CONTAINER (dialog), 5);
+	g_object_set (widget,
+		"margin-start", 6,
+		"margin-end", 6,
+		"margin-top", 6,
+		"margin-bottom", 6,
+		NULL);
 
 	grid = g_object_new (
 		GTK_TYPE_GRID,
@@ -129,12 +152,22 @@ trust_prompt_show (GtkWindow *parent,
 		"halign", GTK_ALIGN_FILL,
 		"vexpand", TRUE,
 		"valign", GTK_ALIGN_FILL,
+		"margin-start", 6,
+		"margin-end", 6,
+		"margin-top", 6,
+		"margin-bottom", 6,
 		NULL);
 
-	gtk_container_set_border_width (GTK_CONTAINER (grid), 5);
+#if GTK_CHECK_VERSION(4, 0, 0)
+	gtk_box_append (GTK_BOX (widget), GTK_WIDGET (grid));
+
+	widget = gtk_image_new_from_icon_name ("dialog-warning");
+	gtk_image_set_pixel_size (GTK_IMAGE (widget), 48);
+#else
 	gtk_container_add (GTK_CONTAINER (widget), GTK_WIDGET (grid));
 
 	widget = gtk_image_new_from_icon_name ("dialog-warning", GTK_ICON_SIZE_DIALOG);
+#endif
 	g_object_set (
 		G_OBJECT (widget),
 		"vexpand", FALSE,
@@ -186,7 +219,6 @@ trust_prompt_show (GtkWindow *parent,
 	g_free (bhost);
 
 	widget = gtk_label_new (NULL);
-	gtk_label_set_line_wrap (GTK_LABEL (widget), TRUE);
 	gtk_label_set_markup (GTK_LABEL (widget), tmp);
 	g_object_set (
 		G_OBJECT (widget),
@@ -197,6 +229,7 @@ trust_prompt_show (GtkWindow *parent,
 		"max-width-chars", 80,
 		"xalign", 0.0,
 		"yalign", 0.0,
+		"wrap", TRUE,
 		NULL);
 
 	g_free (tmp);
@@ -209,26 +242,19 @@ trust_prompt_show (GtkWindow *parent,
 	if (error_text)
 		trust_prompt_add_info_line (grid, _("Detailed error:"), error_text, FALSE, TRUE, FALSE, &row);
 
-	data = gcr_parsed_get_data (parsed, &length);
-	attributes = gcr_parsed_get_attributes (parsed);
+	widget = e_certificate_widget_new ();
+	e_certificate_widget_set_pem (E_CERTIFICATE_WIDGET (widget), certificate_pem);
 
-	certificate = gcr_simple_certificate_new (data, length);
-
-	certificate_widget = gcr_certificate_widget_new (certificate);
-	gcr_certificate_widget_set_attributes (certificate_widget, attributes);
-
-	widget = GTK_WIDGET (certificate_widget);
 	gtk_grid_attach (grid, widget, 1, row, 2, 1);
-	gtk_widget_show (widget);
 
-	g_clear_object (&certificate);
-
+#if !GTK_CHECK_VERSION(4, 0, 0)
 	gtk_widget_show_all (GTK_WIDGET (grid));
+#endif
 
 	if (dialog_ready_cb)
 		dialog_ready_cb (GTK_DIALOG (dialog), user_data);
 
-	switch (gtk_dialog_run (GTK_DIALOG (dialog))) {
+	switch (_libedataserverui_dialog_run (GTK_DIALOG (dialog))) {
 	case GTK_RESPONSE_REJECT:
 		response = E_TRUST_PROMPT_RESPONSE_REJECT;
 		break;
@@ -243,7 +269,11 @@ trust_prompt_show (GtkWindow *parent,
 		break;
 	}
 
+#if GTK_CHECK_VERSION(4, 0, 0)
+	gtk_window_destroy (GTK_WINDOW (dialog));
+#else
 	gtk_widget_destroy (dialog);
+#endif
 
 	return response;
 }
@@ -297,18 +327,6 @@ e_trust_prompt_describe_certificate_errors (GTlsCertificateFlags flags)
 	return g_string_free (reason, FALSE);
 }
 
-static void
-trust_prompt_parser_parsed_cb (GcrParser *parser,
-			       GcrParsed **out_parsed)
-{
-	GcrParsed *parsed;
-
-	parsed = gcr_parser_get_parsed (parser);
-	g_return_if_fail (parsed != NULL);
-
-	*out_parsed = gcr_parsed_ref (parsed);
-}
-
 static ETrustPromptResponse
 e_trust_prompt_run_with_dialog_ready_callback (GtkWindow *parent,
 					       const gchar *source_extension,
@@ -321,51 +339,18 @@ e_trust_prompt_run_with_dialog_ready_callback (GtkWindow *parent,
 					       gpointer user_data)
 {
 	ETrustPromptResponse response = E_TRUST_PROMPT_RESPONSE_UNKNOWN;
-	GcrParser *parser;
-	GcrParsed *parsed = NULL;
-	GError *local_error = NULL;
+	gchar *reason;
 
 	if (parent)
 		g_return_val_if_fail (GTK_IS_WINDOW (parent), E_TRUST_PROMPT_RESPONSE_UNKNOWN);
 	g_return_val_if_fail (host != NULL, E_TRUST_PROMPT_RESPONSE_UNKNOWN);
 	g_return_val_if_fail (certificate_pem != NULL, E_TRUST_PROMPT_RESPONSE_UNKNOWN);
 
-	/* Continue even if PKCS#11 module registration fails.
-	 * Certificate details won't display correctly but the
-	 * user can still respond to the prompt. */
-	gcr_pkcs11_initialize (NULL, &local_error);
-	if (local_error != NULL) {
-		g_warning ("%s: gcr_pkcs11_initialize() call failed: %s", G_STRFUNC, local_error->message);
-		g_clear_error (&local_error);
-	}
+	reason = e_trust_prompt_describe_certificate_errors (certificate_errors);
 
-	parser = gcr_parser_new ();
+	response = trust_prompt_show (parent, source_extension, source_display_name, host, error_text, certificate_pem, reason, dialog_ready_cb, user_data);
 
-	g_signal_connect (
-		parser, "parsed",
-		G_CALLBACK (trust_prompt_parser_parsed_cb), &parsed);
-
-	gcr_parser_parse_data (parser, (const guchar *) certificate_pem, strlen (certificate_pem), &local_error);
-
-	g_object_unref (parser);
-
-	/* Sanity check. */
-	g_warn_if_fail (
-		((parsed != NULL) && (local_error == NULL)) ||
-		((parsed == NULL) && (local_error != NULL)));
-
-	if (parsed != NULL) {
-		gchar *reason;
-
-		reason = e_trust_prompt_describe_certificate_errors (certificate_errors);
-
-		response = trust_prompt_show (parent, source_extension, source_display_name, host, error_text, parsed, reason, dialog_ready_cb, user_data);
-
-		gcr_parsed_unref (parsed);
-		g_free (reason);
-	}
-
-	g_clear_error (&local_error);
+	g_free (reason);
 
 	return response;
 }
@@ -486,24 +471,24 @@ save_source_thread (GTask *task,
 static gchar *
 trust_prompt_get_host_from_url (const gchar *url)
 {
-	SoupURI *suri;
+	GUri *suri;
 	gchar *host;
 
 	if (!url || !*url)
 		return NULL;
 
-	suri = soup_uri_new (url);
+	suri = g_uri_parse (url, SOUP_HTTP_URI_FLAGS | G_URI_FLAGS_PARSE_RELAXED, NULL);
 	if (!suri)
 		return NULL;
 
-	host = g_strdup (soup_uri_get_host (suri));
+	host = g_strdup (g_uri_get_host (suri));
 
 	if (!host || !*host) {
 		g_free (host);
 		host = NULL;
 	}
 
-	soup_uri_free (suri);
+	g_uri_unref (suri);
 
 	return host;
 }
