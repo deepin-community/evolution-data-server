@@ -371,7 +371,8 @@ camel_store_summary_array (CamelStoreSummary *summary)
 /**
  * camel_store_summary_array_free:
  * @summary: a #CamelStoreSummary object
- * @array: (element-type CamelStoreInfo): the summary array as gotten from camel_store_summary_array()
+ * @array: (element-type CamelStoreInfo) (transfer full): the summary array as gotten from
+ * camel_store_summary_array()
  *
  * Free the folder summary array.
  **/
@@ -400,7 +401,7 @@ camel_store_summary_array_free (CamelStoreSummary *summary,
  * The returned #CamelStoreInfo is referenced for thread-safety and should be
  * unreferenced with camel_store_summary_info_unref() when finished with it.
  *
- * Returns: the summary item, or %NULL if the @path name is not
+ * Returns: (nullable): the summary item, or %NULL if the @path name is not
  * available
  **/
 CamelStoreInfo *
@@ -674,7 +675,7 @@ camel_store_summary_info_ref (CamelStoreSummary *summary,
 /**
  * camel_store_summary_info_unref:
  * @summary: a #CamelStoreSummary object
- * @info: a #CamelStoreInfo
+ * @info: (transfer full): a #CamelStoreInfo
  *
  * Unref and potentially free @info, and all associated memory.
  **/
@@ -773,7 +774,7 @@ camel_store_summary_remove_path (CamelStoreSummary *summary,
  * Allocate a new #CamelStoreInfo, suitable for adding to this
  * summary.
  *
- * Returns: the newly allocated #CamelStoreInfo
+ * Returns: (transfer full): the newly allocated #CamelStoreInfo
  **/
 CamelStoreInfo *
 camel_store_summary_info_new (CamelStoreSummary *summary)

@@ -115,6 +115,7 @@
 #include "e-source-uoa.h"
 #include "e-source-weather.h"
 #include "e-source-webdav.h"
+#include "e-source-webdav-notes.h"
 
 #include "e-source.h"
 
@@ -1041,6 +1042,20 @@ source_idle_changed_cb (gpointer user_data)
 	return FALSE;
 }
 
+static void source_connect_dbus_source (ESource *source);
+
+static void
+e_source_dbus_object_notify_source_cb (GObject *dbus_object,
+				       GParamSpec *param,
+				       gpointer user_data)
+{
+	ESource *source = user_data;
+
+	g_return_if_fail (E_IS_SOURCE (source));
+
+	source_connect_dbus_source (source);
+}
+
 static void
 source_set_dbus_object (ESource *source,
                         EDBusObject *dbus_object)
@@ -1052,7 +1067,10 @@ source_set_dbus_object (ESource *source,
 	g_return_if_fail (E_DBUS_IS_OBJECT (dbus_object));
 	g_return_if_fail (source->priv->dbus_object == NULL);
 
-	source->priv->dbus_object = g_object_ref (dbus_object);
+	source->priv->dbus_object = G_DBUS_OBJECT (g_object_ref (dbus_object));
+
+	g_signal_connect_object (source->priv->dbus_object, "notify::source",
+		G_CALLBACK (e_source_dbus_object_notify_source_cb), source, 0);
 }
 
 static void
@@ -1230,14 +1248,13 @@ source_dispose (GObject *object)
 
 		dbus_source = e_dbus_object_get_source (dbus_object);
 		if (dbus_source != NULL) {
-			g_signal_handlers_disconnect_matched (
-				dbus_source, G_SIGNAL_MATCH_DATA,
-				0, 0, NULL, NULL, object);
+			g_signal_handlers_disconnect_by_data (dbus_source, object);
 			g_object_unref (dbus_source);
 		}
 
-		g_object_unref (priv->dbus_object);
-		priv->dbus_object = NULL;
+		g_signal_handlers_disconnect_by_data (priv->dbus_object, object);
+
+		g_clear_object (&priv->dbus_object);
 	}
 
 	g_mutex_unlock (&priv->property_lock);
@@ -2013,6 +2030,11 @@ source_connect_dbus_source (ESource *source)
 	dbus_source = e_dbus_object_get_source (dbus_object);
 	g_return_if_fail (E_DBUS_IS_SOURCE (dbus_source));
 
+	g_signal_handlers_disconnect_by_func (dbus_source, source_notify_dbus_data_cb, source);
+	g_signal_handlers_disconnect_by_func (dbus_source, source_notify_dbus_connection_status_cb, source);
+	g_signal_handlers_disconnect_by_func (dbus_source, source_dbus_credentials_required_cb, source);
+	g_signal_handlers_disconnect_by_func (dbus_source, source_dbus_authenticate_cb, source);
+
 	g_signal_connect_object (
 		dbus_source, "notify::data",
 		G_CALLBACK (source_notify_dbus_data_cb), source, 0);
@@ -2432,6 +2454,7 @@ e_source_class_init (ESourceClass *class)
 	g_type_ensure (E_TYPE_SOURCE_UOA);
 	g_type_ensure (E_TYPE_SOURCE_WEATHER);
 	g_type_ensure (E_TYPE_SOURCE_WEBDAV);
+	g_type_ensure (E_TYPE_SOURCE_WEBDAV_NOTES);
 }
 
 static void
@@ -2502,13 +2525,20 @@ __e_source_private_replace_dbus_object (ESource *source,
 		dbus_source = e_dbus_object_get_source (E_DBUS_OBJECT (source->priv->dbus_object));
 
 		if (dbus_source) {
-			g_signal_handlers_disconnect_by_data (dbus_source, source),
+			g_signal_handlers_disconnect_by_data (dbus_source, source);
 			g_object_unref (dbus_source);
 		}
+
+		g_signal_handlers_disconnect_by_func (source->priv->dbus_object, e_source_dbus_object_notify_source_cb, source);
 	}
 
 	g_clear_object (&source->priv->dbus_object);
 	source->priv->dbus_object = dbus_object;
+
+	if (source->priv->dbus_object) {
+		g_signal_connect_object (source->priv->dbus_object, "notify::source",
+			G_CALLBACK (e_source_dbus_object_notify_source_cb), source, 0);
+	}
 
 	g_mutex_unlock (&source->priv->property_lock);
 
@@ -4592,7 +4622,7 @@ e_source_invoke_credentials_required_sync (ESource *source,
 
 	flags_class = g_type_class_ref (G_TYPE_TLS_CERTIFICATE_FLAGS);
 	for (flags_value = g_flags_get_first_value (flags_class, certificate_errors);
-	     flags_value;
+	     flags_value && certificate_errors;
 	     flags_value = g_flags_get_first_value (flags_class, certificate_errors)) {
 		if (certificate_errors_str->len)
 			g_string_append_c (certificate_errors_str, ':');

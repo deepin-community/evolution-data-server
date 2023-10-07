@@ -4791,7 +4791,7 @@ e_cal_client_create_objects_finish (ECalClient *client,
  * @client: an #ECalClient
  * @icalcomps: (element-type ICalComponent): The components to create
  * @opflags: (type ECalOperationFlags): bit-or of #ECalOperationFlags
- * @out_uids: (out) (nullable) (element-type utf8): Return value for the UIDs assigned
+ * @out_uids: (out) (optional) (element-type utf8): Return value for the UIDs assigned
  *            to the new components by the calendar backend
  * @cancellable: a #GCancellable; can be %NULL
  * @error: a #GError to set an error, if any
@@ -4822,7 +4822,6 @@ e_cal_client_create_objects_sync (ECalClient *client,
 
 	g_return_val_if_fail (E_IS_CAL_CLIENT (client), FALSE);
 	g_return_val_if_fail (icalcomps != NULL, FALSE);
-	g_return_val_if_fail (out_uids != NULL, FALSE);
 
 	strv = g_new0 (gchar *, g_slist_length (icalcomps) + 1);
 	while (icalcomps != NULL) {
@@ -5188,13 +5187,13 @@ e_cal_client_modify_objects_sync (ECalClient *client,
 
 	mod_flags = g_string_new (NULL);
 	flags_class = g_type_class_ref (E_TYPE_CAL_OBJ_MOD_TYPE);
-	flags_value = g_flags_get_first_value (flags_class, mod);
-	while (flags_value != NULL) {
+	for (flags_value = g_flags_get_first_value (flags_class, mod);
+	     flags_value && mod;
+	     flags_value = g_flags_get_first_value (flags_class, mod)) {
 		if (mod_flags->len > 0)
 			g_string_append_c (mod_flags, ':');
 		g_string_append (mod_flags, flags_value->value_nick);
 		mod &= ~flags_value->value;
-		flags_value = g_flags_get_first_value (flags_class, mod);
 	}
 
 	strv = g_new0 (gchar *, g_slist_length (icalcomps) + 1);
@@ -5550,13 +5549,13 @@ e_cal_client_remove_objects_sync (ECalClient *client,
 
 	mod_flags = g_string_new (NULL);
 	flags_class = g_type_class_ref (E_TYPE_CAL_OBJ_MOD_TYPE);
-	flags_value = g_flags_get_first_value (flags_class, mod);
-	while (flags_value != NULL) {
+	for (flags_value = g_flags_get_first_value (flags_class, mod);
+	     flags_value && mod;
+	     flags_value = g_flags_get_first_value (flags_class, mod)) {
 		if (mod_flags->len > 0)
 			g_string_append_c (mod_flags, ':');
 		g_string_append (mod_flags, flags_value->value_nick);
 		mod &= ~flags_value->value;
-		flags_value = g_flags_get_first_value (flags_class, mod);
 	}
 
 	g_variant_builder_init (&builder, G_VARIANT_TYPE ("a(ss)"));

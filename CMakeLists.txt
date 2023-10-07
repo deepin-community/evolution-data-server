@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.1)
 cmake_policy(VERSION 3.1)
 
 project(evolution-data-server
-	VERSION 3.42.1
+	VERSION 3.44.4
 	LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(PROJECT_BUGREPORT "https://gitlab.gnome.org/GNOME/evolution-data-server/issues/")
@@ -12,7 +12,7 @@ set(PROJECT_BUGREPORT "https://gitlab.gnome.org/GNOME/evolution-data-server/issu
 # Base Version: This is for API/version tracking for things like
 # D-Bus server files. This should always be the major/minor of
 # the stable version or stable version to be.
-set(BASE_VERSION 3.42)
+set(BASE_VERSION 3.44)
 
 # This number is meaningless, but we're now stuck with it in our
 # library names for backward compatibility.
@@ -119,6 +119,7 @@ set(sqlite_minimum_version 3.7.17)
 # Optional Packages
 set(goa_minimum_version 3.8)
 set(gweather_minimum_version 3.10)
+set(gweather4_minimum_version 3.91.0)
 set(libaccounts_glib_minimum_version 1.4)
 set(libsignon_glib_minimum_version 1.8)
 set(json_glib_minimum_version 1.0.4)
@@ -145,6 +146,7 @@ include(CheckCSourceRuns)
 include(CheckFunctionExists)
 include(CheckIncludeFile)
 include(CheckLibraryExists)
+include(CheckTypeSize)
 
 # Project custom modules
 include(PrintableOptions)
@@ -195,6 +197,7 @@ set(privdatadir "${SHARE_INSTALL_PREFIX}/${PROJECT_NAME}")
 set(privincludedir "${INCLUDE_INSTALL_DIR}/${PROJECT_NAME}")
 set(privlibdir "${LIB_INSTALL_DIR}/${PROJECT_NAME}")
 set(privlibexecdir "${LIBEXEC_INSTALL_DIR}/${PROJECT_NAME}")
+set(icondir "${privdatadir}/icons")
 
 SET(CMAKE_INSTALL_RPATH "${privlibdir}")
 
@@ -273,8 +276,10 @@ include(InstalledTests)
 include(PkgConfigEx)
 include(SetupBuildFlags)
 include(UninstallTarget)
+include(IconCache)
 
-include(FindIntltool)
+include(FindGettext)
+include(I18n)
 include(FindKRB5)
 include(FindLDAP)
 include(FindPhonenumber)
@@ -751,7 +756,13 @@ endif(NOT have_addrinfo)
 add_printable_option(ENABLE_WEATHER "Build the weather calendar backend" ON)
 
 if(ENABLE_WEATHER)
-	pkg_check_modules_for_option(ENABLE_WEATHER "weather calendar backend" LIBGWEATHER gweather-3.0>=${gweather_minimum_version})
+	add_printable_variable(WITH_GWEATHER4 "Use GWeather 4 instead of 3" OFF)
+
+	if(WITH_GWEATHER4)
+		pkg_check_modules_for_option(ENABLE_WEATHER "weather calendar backend" LIBGWEATHER gweather4>=${gweather4_minimum_version})
+	else(WITH_GWEATHER4)
+		pkg_check_modules_for_option(ENABLE_WEATHER "weather calendar backend" LIBGWEATHER gweather-3.0>=${gweather_minimum_version})
+	endif(WITH_GWEATHER4)
 
 	set(CMAKE_REQUIRED_INCLUDES ${LIBGWEATHER_INCLUDE_DIRS})
 	set(CMAKE_REQUIRED_LIBRARIES ${LIBGWEATHER_LDFLAGS})
@@ -940,7 +951,7 @@ set(ADDRESSBOOK_LDFLAGS ${ADDRESSBOOK_LDFLAGS} ${PHONENUMBER_LDFLAGS})
 set(CALENDAR_CFLAGS ${CALENDAR_CFLAGS} -DLIBICAL_GLIB_UNSTABLE_API=1)
 
 pkg_check_modules(CAMEL REQUIRED gio-2.0 gmodule-2.0 ${mozilla_nss} ${mozilla_nspr} sqlite3>=${sqlite_minimum_version})
-set(CAMEL_CFLAGS ${CAMEL_CFLAGS} ${KRB5_CFLAGS} ${MANUAL_NSS_CFLAGS} ${MANUAL_NSPR_CFLAGS} ${ICU_CFLAGS})
+set(CAMEL_CFLAGS ${CAMEL_CFLAGS} ${KRB5_CFLAGS} ${MANUAL_NSS_INCLUDES} ${MANUAL_NSPR_INCLUDES} ${ICU_CFLAGS})
 set(CAMEL_LDFLAGS ${CAMEL_LDFLAGS} -lz ${KRB5_LDFLAGS} ${MANUAL_NSS_LIBS} ${MANUAL_NSPR_LIBS} ${ICU_LDFLAGS})
 
 if(NOT (MANUAL_NSPR_INCLUDES STREQUAL ""))
@@ -973,6 +984,13 @@ if(ENABLE_VALA_BINDINGS)
 	endif(NOT VAPIGEN)
 
 endif(ENABLE_VALA_BINDINGS)
+
+set(CMAKE_EXTRA_INCLUDE_FILES "time.h")
+CHECK_TYPE_SIZE("time_t" SIZEOF_TIME_T)
+if("${SIZEOF_TIME_T}" STREQUAL "4")
+	set(HAVE_32BIT_TIME_T 1)
+endif("${SIZEOF_TIME_T}" STREQUAL "4")
+unset(CMAKE_EXTRA_INCLUDE_FILES)
 
 # Generate the ${PROJECT_NAME}-config.h file
 CONFIGURE_FILE(${CMAKE_SOURCE_DIR}/config.h.in ${CMAKE_BINARY_DIR}/${PROJECT_NAME}-config.h)

@@ -343,8 +343,12 @@ intersects_interval (const ICalTime *tt,
 		i_cal_time_adjust (ttend, default_duration_days, 0, 0, default_duration_seconds);
 	}
 
-	res = e_timetype_compare_without_date (ttstart, interval_end) < 0 &&
-	      e_timetype_compare_without_date (interval_start, ttend) < 0;
+	if (i_cal_time_compare (ttstart, ttend) == 0)
+		res = e_timetype_compare_without_date (ttstart, interval_end) < 0 &&
+		      e_timetype_compare_without_date (interval_start, ttend) <= 0;
+	else
+		res = e_timetype_compare_without_date (ttstart, interval_end) < 0 &&
+		      e_timetype_compare_without_date (interval_start, ttend) < 0;
 
 	g_clear_object (&ttstart);
 	g_clear_object (&ttend);
@@ -419,7 +423,7 @@ e_cal_recur_generate_instances_sync (ICalComponent *icalcomp,
 		get_tz_callback, get_tz_callback_user_data, default_timezone, &cached_zones, cancellable, error);
 
 	duration_seconds = 0;
-	dtend = i_cal_component_get_dtend (icalcomp);
+	dtend = i_cal_component_isa (icalcomp) == I_CAL_VEVENT_COMPONENT ? i_cal_component_get_dtend (icalcomp) : NULL;
 
 	if (!dtend || i_cal_time_is_null_time (dtend)) {
 		g_clear_object (&dtend);
@@ -525,11 +529,6 @@ e_cal_recur_generate_instances_sync (ICalComponent *icalcomp,
 			if (rrule_until && !i_cal_time_is_null_time (rrule_until) &&
 			    i_cal_time_is_date (rrule_until) && !i_cal_time_is_date (dtstart)) {
 				i_cal_time_adjust (rrule_until, 1, 0, 0, 0);
-				i_cal_time_set_is_date (rrule_until, FALSE);
-				i_cal_time_set_time (rrule_until, 0, 0, 0);
-
-				if (!i_cal_time_get_timezone (rrule_until) && !i_cal_time_is_utc (rrule_until))
-					i_cal_time_set_timezone (rrule_until, dtstart_zone);
 			}
 
 			if (rrule_until && !i_cal_time_is_null_time (rrule_until))
@@ -672,11 +671,6 @@ e_cal_recur_generate_instances_sync (ICalComponent *icalcomp,
 			if (exrule_until && !i_cal_time_is_null_time (exrule_until) &&
 			    i_cal_time_is_date (exrule_until) && !i_cal_time_is_date (dtstart)) {
 				i_cal_time_adjust (exrule_until, 1, 0, 0, 0);
-				i_cal_time_set_is_date (exrule_until, FALSE);
-				i_cal_time_set_time (exrule_until, 0, 0, 0);
-
-				if (!i_cal_time_get_timezone (exrule_until) && !i_cal_time_is_utc (exrule_until))
-					i_cal_time_set_timezone (exrule_until, dtstart_zone);
 			}
 
 			if (exrule_until && !i_cal_time_is_null_time (exrule_until))
@@ -896,10 +890,14 @@ e_cal_recur_generate_instances_sync (ICalComponent *icalcomp,
  *     spec.
  */
 
+#ifdef HAVE_32BIT_TIME_T
 /* This is the maximum year we will go up to (inclusive). Since we use time_t
  * values we can't go past 2037 anyway, and some of our VTIMEZONEs may stop
  * at 2037 as well. */
 #define MAX_YEAR	2037
+#else
+#define MAX_YEAR	9999
+#endif
 
 /* Define this for some debugging output. */
 #if 0
@@ -4854,6 +4852,11 @@ e_cal_recur_set_rule_end_date (ICalProperty *prop,
 	ICalTime *icaltime;
 	const gchar *xname;
 	gchar *end_date_string;
+
+	if (end_date <= 0) {
+		i_cal_property_remove_parameter_by_name (prop, E_CAL_EVOLUTION_ENDDATE_PARAMETER);
+		return;
+	}
 
 	/* We save the value as a UTC DATE-TIME. */
 	utc_zone = i_cal_timezone_get_utc_timezone ();

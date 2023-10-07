@@ -1137,7 +1137,7 @@ get_folder_offline (CamelStore *store,
 
 	si = camel_store_summary_path (imapx_store->summary, folder_name);
 
-	if (si != NULL) {
+	if (si != NULL && !(si->flags & CAMEL_STORE_INFO_FOLDER_NOSELECT)) {
 		gchar *base_dir;
 		gchar *folder_dir;
 
@@ -1147,14 +1147,15 @@ get_folder_offline (CamelStore *store,
 			store, folder_dir, folder_name, error);
 		g_free (folder_dir);
 		g_free (base_dir);
-
-		camel_store_summary_info_unref (imapx_store->summary, si);
 	} else {
 		g_set_error (
 			error, CAMEL_STORE_ERROR,
 			CAMEL_STORE_ERROR_NO_FOLDER,
 			_("No such folder %s"), folder_name);
 	}
+
+	if (si)
+		camel_store_summary_info_unref (imapx_store->summary, si);
 
 	return new_folder;
 }
@@ -1962,10 +1963,11 @@ imapx_can_refresh_folder (CamelStore *store,
 
 	subscribed = ((info->flags & CAMEL_FOLDER_SUBSCRIBED) != 0);
 
-	res = store_class->can_refresh_folder (store, info, &local_error) ||
-		check_all || (check_subscribed && subscribed);
+	res = !(info->flags & CAMEL_FOLDER_NOSELECT) && (
+		store_class->can_refresh_folder (store, info, &local_error) ||
+		check_all || (check_subscribed && subscribed));
 
-	if (!res && !local_error) {
+	if (!res && !local_error && !(info->flags & CAMEL_FOLDER_NOSELECT)) {
 		CamelFolder *folder;
 
 		folder = camel_store_get_folder_sync (store, info->full_name, 0, NULL, &local_error);
@@ -2276,6 +2278,7 @@ imapx_store_create_folder_sync (CamelStore *store,
 	CamelFolder *folder;
 	CamelIMAPXMailbox *parent_mailbox = NULL;
 	CamelFolderInfo *fi = NULL;
+	CamelStoreInfo *si;
 	GList *list;
 	const gchar *namespace_prefix;
 	const gchar *parent_mailbox_name;
@@ -2291,6 +2294,16 @@ imapx_store_create_folder_sync (CamelStore *store,
 
 	/* Obtain the separator from the parent CamelIMAPXMailbox. */
 
+	si = camel_store_summary_path (imapx_store->summary, parent_name);
+
+	if (!si || (si->flags & CAMEL_STORE_INFO_FOLDER_NOSELECT) != 0) {
+		if (si)
+			camel_store_summary_info_unref (imapx_store->summary, si);
+		goto check_namespace;
+	}
+
+	camel_store_summary_info_unref (imapx_store->summary, si);
+
 	folder = camel_store_get_folder_sync (
 		store, parent_name, 0, cancellable, error);
 
@@ -2304,6 +2317,16 @@ imapx_store_create_folder_sync (CamelStore *store,
 		goto exit;
 
 	separator = camel_imapx_mailbox_get_separator (parent_mailbox);
+
+	/* NIL separator means flat structure, where subfolders cannot be created */
+	if (!separator) {
+		g_object_unref (parent_mailbox);
+		/* Cannot set error here, like in the development version, due to untranslated
+		   string, thus let it create the folder in the top level. Evolution throws
+		   an error about "folder not found" due to using the path with the parent folder. */
+		goto check_namespace;
+	}
+
 	parent_mailbox_name = camel_imapx_mailbox_get_name (parent_mailbox);
 
 	mailbox_name = g_strdup_printf (
@@ -2342,7 +2365,7 @@ check_namespace:
 
 check_separator:
 
-	if (strchr (folder_name, separator) != NULL) {
+	if (separator && strchr (folder_name, separator) != NULL) {
 		g_set_error (
 			error, CAMEL_FOLDER_ERROR,
 			CAMEL_FOLDER_ERROR_INVALID_PATH,
@@ -2842,20 +2865,22 @@ imapx_store_dup_downsync_folders_recurse (CamelStore *store,
 					  GPtrArray **inout_folders)
 {
 	while (info) {
-		CamelFolder *folder;
-
 		if (info->child)
 			imapx_store_dup_downsync_folders_recurse (store, info->child, inout_folders);
 
-		folder = camel_store_get_folder_sync (store, info->full_name, 0, NULL, NULL);
-		if (folder && CAMEL_IS_IMAPX_FOLDER (folder) &&
-		    camel_offline_folder_can_downsync (CAMEL_OFFLINE_FOLDER (folder))) {
-			if (!*inout_folders)
-				*inout_folders = g_ptr_array_sized_new (32);
-			g_ptr_array_add (*inout_folders, g_object_ref (folder));
-		}
+		if (!(info->flags & CAMEL_FOLDER_NOSELECT)) {
+			CamelFolder *folder;
 
-		g_clear_object (&folder);
+			folder = camel_store_get_folder_sync (store, info->full_name, 0, NULL, NULL);
+			if (folder && CAMEL_IS_IMAPX_FOLDER (folder) &&
+			    camel_offline_folder_can_downsync (CAMEL_OFFLINE_FOLDER (folder))) {
+				if (!*inout_folders)
+					*inout_folders = g_ptr_array_sized_new (32);
+				g_ptr_array_add (*inout_folders, g_object_ref (folder));
+			}
+
+			g_clear_object (&folder);
+		}
 
 		info = info->next;
 	}
@@ -3152,12 +3177,20 @@ imapx_store_unsubscribe_folder_sync (CamelSubscribable *subscribable,
 	success = camel_imapx_conn_manager_unsubscribe_mailbox_sync (conn_man, mailbox, cancellable, error);
 
 	if (success) {
-		CamelFolderInfo *fi;
+		CamelSettings *settings;
 
-		fi = imapx_store_build_folder_info (
-			CAMEL_IMAPX_STORE (subscribable), folder_name, 0);
-		camel_subscribable_folder_unsubscribed (subscribable, fi);
-		camel_folder_info_free (fi);
+		settings = camel_service_ref_settings (CAMEL_SERVICE (imapx_store));
+
+		/* Notify about unsubscribed folder only if showing subscribed folders only */
+		if (camel_imapx_settings_get_use_subscriptions (CAMEL_IMAPX_SETTINGS (settings))) {
+			CamelFolderInfo *fi;
+
+			fi = imapx_store_build_folder_info (imapx_store, folder_name, 0);
+			camel_subscribable_folder_unsubscribed (subscribable, fi);
+			camel_folder_info_free (fi);
+		}
+
+		g_clear_object (&settings);
 	}
 
 exit:
@@ -3795,7 +3828,7 @@ camel_imapx_store_ref_mailbox (CamelIMAPXStore *imapx_store,
  * camel_imapx_store_list_mailboxes:
  * @imapx_store: a #CamelIMAPXStore
  * @namespace_: a #CamelIMAPXNamespace
- * @pattern: mailbox name with possible wildcards, or %NULL
+ * @pattern: (nullable): mailbox name with possible wildcards, or %NULL
  *
  * Returns a list of #CamelIMAPXMailbox instances which match @namespace and
  * @pattern. The @pattern may contain wildcard characters '*' and '%', which

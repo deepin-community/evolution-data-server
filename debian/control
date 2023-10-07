@@ -5,12 +5,12 @@
 Source: evolution-data-server
 Section: gnome
 Priority: optional
-Maintainer: Deepin Developer <deepin-dev@deepin.org>
-Uploaders: Deepin Packages Builder <packages@deepin.org>
+Maintainer: Debian GNOME Maintainers <pkg-gnome-maintainers@lists.alioth.debian.org>
+Uploaders: Iain Lane <laney@debian.org>, Jeremy Bicha <jbicha@ubuntu.com>, Laurent Bigonville <bigon@debian.org>
 Build-Depends: cmake,
                debhelper-compat (= 13),
                dh-sequence-gir,
-#               dh-sequence-gnome,
+               dh-sequence-gnome,
                libtool,
                intltool (>= 0.35.5),
                libcanberra-gtk3-dev (>= 0.25),
@@ -23,7 +23,7 @@ Build-Depends: cmake,
                libgcr-3-dev (>= 3.4),
                libgoa-1.0-dev (>= 3.8),
                libgtk-3-dev (>= 3.10),
-               libgweather-3-dev (>= 40.0),
+               libgweather-4-dev (>= 4.0),
                libical-dev (>= 3.0.7),
                libicu-dev,
                libjson-glib-dev (>= 1.0.4) [!ia64 !kfreebsd-any],
@@ -47,8 +47,8 @@ Build-Depends: cmake,
 Rules-Requires-Root: binary-targets
 Standards-Version: 4.5.0
 Homepage: https://wiki.gnome.org/Apps/Evolution
-#Vcs-Git
-#Vcs-Browser
+Vcs-Git: https://salsa.debian.org/gnome-team/evolution-data-server.git
+Vcs-Browser: https://salsa.debian.org/gnome-team/evolution-data-server
 
 Package: evolution-data-server
 Architecture: any
@@ -118,7 +118,7 @@ Architecture: any
 Multi-Arch: same
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         evolution-data-server-common (>= ${source:Version})
+         evolution-data-server-common (>= ${gnome:Version})
 Description: Utility library for evolution data servers
  The data server, called "Evolution Data Server" is responsible for managing
  calendar and addressbook information.
@@ -166,7 +166,7 @@ Architecture: any
 Multi-Arch: same
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         evolution-data-server-common (>= ${source:Version})
+         evolution-data-server-common (>= ${gnome:Version})
 Description: Utility library for evolution data servers
  The data server, called "Evolution Data Server" is responsible for managing
  calendar and addressbook information.

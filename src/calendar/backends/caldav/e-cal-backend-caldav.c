@@ -199,7 +199,8 @@ ecb_caldav_connect_sync (ECalMetaBackend *meta_backend,
 		soup_uri = e_source_webdav_dup_soup_uri (webdav_extension);
 
 		cbdav->priv->calendar_schedule = e_cal_backend_get_kind (E_CAL_BACKEND (cbdav)) != I_CAL_VJOURNAL_COMPONENT &&
-			capabilities && g_hash_table_contains (capabilities, E_WEBDAV_CAPABILITY_CALENDAR_SCHEDULE);
+			(!capabilities || g_hash_table_contains (capabilities, E_WEBDAV_CAPABILITY_CALENDAR_AUTO_SCHEDULE) ||
+			g_hash_table_contains (capabilities, E_WEBDAV_CAPABILITY_CALENDAR_SCHEDULE));
 		calendar_access = capabilities && g_hash_table_contains (capabilities, E_WEBDAV_CAPABILITY_CALENDAR_ACCESS);
 
 		if (calendar_access) {
@@ -544,7 +545,8 @@ ecb_caldav_multiget_from_sets_sync (ECalBackendCalDAV *cbdav,
 	link = *in_link;
 
 	while (link && left_to_go > 0) {
-		ECalMetaBackendInfo *nfo = link->data;
+		GSList *nfo_link = link;
+		ECalMetaBackendInfo *nfo = nfo_link->data;
 
 		link = g_slist_next (link);
 		if (!link) {
@@ -634,7 +636,7 @@ ecb_caldav_multiget_from_sets_sync (ECalBackendCalDAV *cbdav,
 					else
 						e_cal_meta_backend_info_free (nfo);
 
-					link->data = NULL;
+					nfo_link->data = NULL;
 					g_clear_error (&local_error);
 					continue;
 				} else if (local_error) {
@@ -2211,7 +2213,9 @@ ecb_caldav_get_free_busy_sync (ECalBackendSync *sync_backend,
 		const GSList *link;
 		GError *local_error = NULL;
 
-		if (ecb_caldav_get_free_busy_from_schedule_outbox_sync (cbdav, users, start, end, out_freebusy, cancellable, &local_error)) {
+		/* Finish only if found anything, otherwise re-check with the principals */
+		if (ecb_caldav_get_free_busy_from_schedule_outbox_sync (cbdav, users, start, end, out_freebusy, cancellable, &local_error) &&
+		    out_freebusy && *out_freebusy) {
 			g_clear_object (&webdav);
 			return;
 		}
@@ -2319,7 +2323,8 @@ ecb_caldav_get_backend_property (ECalBackend *backend,
 			E_CAL_STATIC_CAPABILITY_NO_THISANDPRIOR ","
 			E_CAL_STATIC_CAPABILITY_REFRESH_SUPPORTED ","
 			E_CAL_STATIC_CAPABILITY_TASK_CAN_RECUR ","
-			E_CAL_STATIC_CAPABILITY_COMPONENT_COLOR);
+			E_CAL_STATIC_CAPABILITY_COMPONENT_COLOR ","
+			E_CAL_STATIC_CAPABILITY_TASK_ESTIMATED_DURATION);
 		g_string_append_c (caps, ',');
 		g_string_append (caps, e_cal_meta_backend_get_capabilities (E_CAL_META_BACKEND (backend)));
 
