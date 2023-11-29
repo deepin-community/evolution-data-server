@@ -31,15 +31,20 @@
 #include <string.h>
 #include <glib/gi18n-lib.h>
 
-#ifdef ENABLE_OAUTH2
+#ifndef BUILDING_VALUE_HELPER
 #include <json-glib/json-glib.h>
-#endif
 
+#include "e-data-server-util.h"
 #include "e-secret-store.h"
+#include "e-soup-session.h"
 #include "e-soup-ssl-trust.h"
 #include "e-source-authentication.h"
 
 #include "e-oauth2-service.h"
+
+/* How many seconds earlier than reported by the server is the token considered expired
+   and will be refreshed. */
+#define TOKEN_VALIDITY_GAP_SECS 10
 
 G_DEFINE_INTERFACE (EOAuth2Service, e_oauth2_service, G_TYPE_OBJECT)
 
@@ -214,6 +219,97 @@ eos_default_prepare_refresh_token_message (EOAuth2Service *service,
 {
 }
 
+static gboolean
+eos_default_extract_authorization_code (EOAuth2Service *service,
+					ESource *source,
+					const gchar *page_title,
+					const gchar *page_uri,
+					const gchar *page_content,
+					gchar **out_authorization_code)
+{
+	gchar *error_code = NULL, *error_message = NULL;
+	gboolean success;
+
+	g_return_val_if_fail (out_authorization_code != NULL, FALSE);
+
+	*out_authorization_code = NULL;
+
+	/* It is an acceptable response when either the authorization code or the error information is set. */
+	success = e_oauth2_service_util_extract_from_uri (page_uri, out_authorization_code, &error_code, &error_message);
+
+	g_free (error_code);
+	g_free (error_message);
+
+	return success;
+}
+
+static gboolean
+eos_default_extract_error_message (EOAuth2Service *service,
+				   ESource *source,
+				   const gchar *page_title,
+				   const gchar *page_uri,
+				   const gchar *page_content,
+				   gchar **out_error_message)
+{
+	gchar *error_code = NULL;
+	gboolean success = FALSE;
+
+	g_return_val_if_fail (out_error_message != NULL, FALSE);
+
+	*out_error_message = NULL;
+
+	/* possibly JSON data */
+	if (page_content && *page_content == '{') {
+		JsonParser *parser;
+
+		parser = json_parser_new ();
+
+		if (json_parser_load_from_data (parser, page_content, strlen (page_content), NULL)) {
+			JsonReader *reader;
+
+			reader = json_reader_new (json_parser_get_root (parser));
+
+			if (json_reader_read_member (reader, "error")) {
+				json_reader_end_member (reader);
+
+				if (json_reader_read_member (reader, "error_description")) {
+					const gchar *value = json_reader_get_string_value (reader);
+
+					if (value && *value) {
+						*out_error_message = g_strdup (value);
+						success = TRUE;
+					}
+				}
+			}
+
+			json_reader_end_member (reader);
+
+			g_object_unref (reader);
+		}
+
+		g_object_unref (parser);
+
+		if (success)
+			return success;
+	}
+
+	success = e_oauth2_service_util_extract_from_uri (page_uri, NULL, &error_code, out_error_message);
+
+	if (success) {
+		/* it means the user cancelled the wizard or did not allow access to the account data */
+		if (g_strcmp0 (error_code, "access_denied") == 0)
+			g_clear_pointer (out_error_message, g_free);
+		else if (!*out_error_message)
+			*out_error_message = g_steal_pointer (&error_code);
+
+		success = *out_error_message != NULL;
+	}
+
+	g_free (error_code);
+
+	return success;
+}
+
 static void
 e_oauth2_service_default_init (EOAuth2ServiceInterface *iface)
 {
@@ -227,6 +323,8 @@ e_oauth2_service_default_init (EOAuth2ServiceInterface *iface)
 	iface->prepare_get_token_message = eos_default_prepare_get_token_message;
 	iface->prepare_refresh_token_form = eos_default_prepare_refresh_token_form;
 	iface->prepare_refresh_token_message = eos_default_prepare_refresh_token_message;
+	iface->extract_authorization_code = eos_default_extract_authorization_code;
+	iface->extract_error_message = eos_default_extract_error_message;
 }
 
 /**
@@ -604,6 +702,8 @@ e_oauth2_service_get_authentication_policy (EOAuth2Service *service,
  *
  * Tries to extract an authorization code from a web page provided by the server.
  * The function can be called multiple times, whenever the page load is finished.
+ * The default implementation uses e_oauth2_service_util_extract_from_uri() to get
+ * the code from the given @page_uri.
  *
  * There can happen three states: 1) either the @service cannot determine
  * the authentication code from the page information, then the %FALSE is
@@ -641,6 +741,50 @@ e_oauth2_service_extract_authorization_code (EOAuth2Service *service,
 	g_return_val_if_fail (iface->extract_authorization_code != NULL, FALSE);
 
 	return iface->extract_authorization_code (service, source, page_title, page_uri, page_content, out_authorization_code);
+}
+
+/**
+ * e_oauth2_service_extract_error_message:
+ * @service: an #EOAuth2Service
+ * @source: an associated #ESource
+ * @page_title: a web page title
+ * @page_uri: a web page URI
+ * @page_content: (nullable): a web page content
+ * @out_error_message: (out) (transfer full): the extracted error message
+ *
+ * Tries to extract error message from the server response, return %TRUE,
+ * when an error message could be found, in which case also sets
+ * the @out_error_message with it. The default implementation uses
+ * e_oauth2_service_util_extract_from_uri(), returning either the error
+ * description or the error code, when the description is not found.
+ *
+ * The @out_error_message is expected to be plain text.
+ *
+ * Returns: whether could recognized failed server response.
+ *    The @out_error_message is populated on success.
+ *
+ * Since: 3.48
+ **/
+gboolean
+e_oauth2_service_extract_error_message (EOAuth2Service *service,
+					ESource *source,
+					const gchar *page_title,
+					const gchar *page_uri,
+					const gchar *page_content,
+					gchar **out_error_message)
+{
+	EOAuth2ServiceInterface *iface;
+
+	g_return_val_if_fail (E_IS_OAUTH2_SERVICE (service), FALSE);
+	g_return_val_if_fail (E_IS_SOURCE (source), FALSE);
+
+	iface = E_OAUTH2_SERVICE_GET_INTERFACE (service);
+	g_return_val_if_fail (iface != NULL, FALSE);
+
+	if (!iface->extract_error_message)
+		return FALSE;
+
+	return iface->extract_error_message (service, source, page_title, page_uri, page_content, out_error_message);
 }
 
 /**
@@ -806,16 +950,14 @@ eos_create_soup_session (EOAuth2ServiceRefSourceFunc ref_source,
 	session = soup_session_new ();
 	g_object_set (
 		session,
-		SOUP_SESSION_TIMEOUT, 90,
-		SOUP_SESSION_SSL_STRICT, TRUE,
-		SOUP_SESSION_SSL_USE_SYSTEM_CA_FILE, TRUE,
-		SOUP_SESSION_ACCEPT_LANGUAGE_AUTO, TRUE,
+		"timeout", 90,
+		"accept-language-auto", TRUE,
 		NULL);
 
 	if (oauth2_debug) {
 		SoupLogger *logger;
 
-		logger = soup_logger_new (SOUP_LOGGER_LOG_BODY, -1);
+		logger = soup_logger_new (SOUP_LOGGER_LOG_BODY);
 		soup_session_add_feature (session, SOUP_SESSION_FEATURE (logger));
 		g_object_unref (logger);
 	}
@@ -836,7 +978,7 @@ eos_create_soup_session (EOAuth2ServiceRefSourceFunc ref_source,
 
 		proxy_resolver = G_PROXY_RESOLVER (proxy_source);
 		if (g_proxy_resolver_is_supported (proxy_resolver))
-			g_object_set (session, SOUP_SESSION_PROXY_RESOLVER, proxy_resolver, NULL);
+			g_object_set (session, "proxy-resolver", proxy_resolver, NULL);
 
 		g_object_unref (proxy_source);
 	}
@@ -867,12 +1009,10 @@ eos_create_soup_message (ESource *source,
 		return NULL;
 	}
 
-	soup_message_set_request (message, "application/x-www-form-urlencoded",
-		SOUP_MEMORY_TAKE, post_data, strlen (post_data));
-
+	e_soup_session_util_set_message_request_body_from_data (message, FALSE, "application/x-www-form-urlencoded", post_data, strlen (post_data), g_free);
 	e_soup_ssl_trust_connect (message, source);
 
-	soup_message_headers_append (message->request_headers, "Connection", "close");
+	soup_message_headers_append (soup_message_get_request_headers (message), "Connection", "close");
 
 	return message;
 }
@@ -887,11 +1027,12 @@ eos_abort_session_cb (GCancellable *cancellable,
 static gboolean
 eos_send_message (SoupSession *session,
 		  SoupMessage *message,
-		  gchar **out_response_body,
+		  GBytes **out_response_body,
 		  GCancellable *cancellable,
 		  GError **error)
 {
-	guint status_code = SOUP_STATUS_CANCELLED;
+	guint status_code = 0;
+	GBytes *response_body = NULL;
 	gboolean success = FALSE;
 
 	g_return_val_if_fail (SOUP_IS_SESSION (session), FALSE);
@@ -904,34 +1045,39 @@ eos_send_message (SoupSession *session,
 		if (cancellable)
 			cancel_handler_id = g_cancellable_connect (cancellable, G_CALLBACK (eos_abort_session_cb), session, NULL);
 
-		status_code = soup_session_send_message (session, message);
+		response_body = soup_session_send_and_read (session, message, cancellable, error);
 
 		if (cancel_handler_id)
 			g_cancellable_disconnect (cancellable, cancel_handler_id);
+
+		status_code = soup_message_get_status (message);
 	}
 
 	if (SOUP_STATUS_IS_SUCCESSFUL (status_code)) {
-		if (message->response_body) {
-			*out_response_body = g_strndup (message->response_body->data, message->response_body->length);
+		if (response_body) {
+			*out_response_body = g_steal_pointer (&response_body);
 			success = TRUE;
 		} else {
-			status_code = SOUP_STATUS_MALFORMED;
-			g_set_error_literal (error, SOUP_HTTP_ERROR, status_code, _("Malformed, no message body set"));
+			g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA, _("Malformed, no message body set"));
 		}
-	} else if (status_code != SOUP_STATUS_CANCELLED) {
+	} else if (status_code != 0) {
 		GString *error_msg;
 
-		error_msg = g_string_new (message->reason_phrase);
-		if (message->response_body && message->response_body->length) {
+		error_msg = g_string_new (soup_message_get_reason_phrase (message));
+		if (response_body && g_bytes_get_size (response_body)) {
 			g_string_append (error_msg, " (");
-			g_string_append_len (error_msg, message->response_body->data, message->response_body->length);
+			g_string_append_len (error_msg, (const gchar *) g_bytes_get_data (response_body, NULL), g_bytes_get_size (response_body));
 			g_string_append_c (error_msg, ')');
+
+			*out_response_body = g_steal_pointer (&response_body);
 		}
 
-		g_set_error_literal (error, SOUP_HTTP_ERROR, message->status_code, error_msg->str);
+		g_set_error_literal (error, E_SOUP_SESSION_ERROR, soup_message_get_status (message), error_msg->str);
 
 		g_string_free (error_msg, TRUE);
 	}
+
+	g_clear_pointer (&response_body, g_bytes_unref);
 
 	return success;
 }
@@ -980,7 +1126,6 @@ eos_encode_to_secret (gchar **out_secret,
 		      const gchar *value1,
 		      ...)
 {
-#ifdef ENABLE_OAUTH2
 	JsonBuilder *builder;
 	JsonNode *node;
 	const gchar *key, *value;
@@ -1032,24 +1177,22 @@ eos_encode_to_secret (gchar **out_secret,
 	}
 
 	return *out_secret != NULL;
-#else
-	return FALSE;
-#endif
 }
 
 static gboolean
 eos_decode_from_secret (const gchar *secret,
+			gssize length,
 			const gchar *key1_name,
 			gchar **out_value1,
 			...) G_GNUC_NULL_TERMINATED;
 
 static gboolean
 eos_decode_from_secret (const gchar *secret,
+			gssize length,
 			const gchar *key1_name,
 			gchar **out_value1,
 			...)
 {
-#ifdef ENABLE_OAUTH2
 	JsonParser *parser;
 	JsonReader *reader;
 	const gchar *key;
@@ -1064,7 +1207,7 @@ eos_decode_from_secret (const gchar *secret,
 		return FALSE;
 
 	parser = json_parser_new ();
-	if (!json_parser_load_from_data (parser, secret, -1, &error)) {
+	if (!json_parser_load_from_data (parser, secret, length, &error)) {
 		g_object_unref (parser);
 
 		g_debug ("%s: Failed to parse secret '%s': %s", G_STRFUNC, secret, error ? error->message : "Unknown error");
@@ -1120,9 +1263,6 @@ eos_decode_from_secret (const gchar *secret,
 	va_end (va);
 
 	return TRUE;
-#else
-	return FALSE;
-#endif
 }
 
 static gboolean
@@ -1219,7 +1359,7 @@ eos_lookup_token_sync (EOAuth2Service *service,
 		return FALSE;
 	}
 
-	success = eos_decode_from_secret (secret,
+	success = eos_decode_from_secret (secret, -1,
 		E_OAUTH2_SECRET_REFRESH_TOKEN, out_refresh_token,
 		E_OAUTH2_SECRET_ACCESS_TOKEN, out_access_token,
 		E_OAUTH2_SECRET_EXPIRES_AFTER, &expires_after,
@@ -1278,7 +1418,7 @@ e_oauth2_service_receive_and_store_token_sync (EOAuth2Service *service,
 	SoupSession *session;
 	SoupMessage *message;
 	GHashTable *post_form;
-	gchar *response_json = NULL;
+	GBytes *response_json = NULL;
 	gboolean success;
 
 	g_return_val_if_fail (E_IS_OAUTH2_SERVICE (service), FALSE);
@@ -1309,7 +1449,7 @@ e_oauth2_service_receive_and_store_token_sync (EOAuth2Service *service,
 	if (success) {
 		gchar *access_token = NULL, *refresh_token = NULL, *expires_in = NULL, *token_type = NULL;
 
-		if (eos_decode_from_secret (response_json,
+		if (eos_decode_from_secret (g_bytes_get_data (response_json, NULL), g_bytes_get_size (response_json),
 			"access_token", &access_token,
 			"refresh_token", &refresh_token,
 			"expires_in", &expires_in,
@@ -1332,7 +1472,8 @@ e_oauth2_service_receive_and_store_token_sync (EOAuth2Service *service,
 
 	g_object_unref (message);
 	g_object_unref (session);
-	e_util_safe_free_string (response_json);
+	if (response_json)
+		g_bytes_unref (response_json);
 
 	return success;
 }
@@ -1367,7 +1508,7 @@ e_oauth2_service_refresh_and_store_token_sync (EOAuth2Service *service,
 	SoupSession *session;
 	SoupMessage *message;
 	GHashTable *post_form;
-	gchar *response_json = NULL;
+	GBytes *response_json = NULL;
 	gboolean success;
 	GError *local_error = NULL;
 
@@ -1396,10 +1537,11 @@ e_oauth2_service_refresh_and_store_token_sync (EOAuth2Service *service,
 	e_oauth2_service_prepare_refresh_token_message (service, source, message);
 
 	success = eos_send_message (session, message, &response_json, cancellable, &local_error);
+
 	if (success) {
 		gchar *access_token = NULL, *expires_in = NULL, *new_refresh_token = NULL;
 
-		if (eos_decode_from_secret (response_json,
+		if (eos_decode_from_secret (g_bytes_get_data (response_json, NULL), g_bytes_get_size (response_json),
 			"access_token", &access_token,
 			"expires_in", &expires_in,
 			"refresh_token", &new_refresh_token,
@@ -1417,10 +1559,30 @@ e_oauth2_service_refresh_and_store_token_sync (EOAuth2Service *service,
 		e_util_safe_free_string (access_token);
 		g_free (new_refresh_token);
 		g_free (expires_in);
-	} else if (g_error_matches (local_error, SOUP_HTTP_ERROR, SOUP_STATUS_BAD_REQUEST)) {
-		g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CONNECTION_REFUSED,
-			_("Failed to refresh access token. Sign to the server again, please."));
+	} else if (g_error_matches (local_error, E_SOUP_SESSION_ERROR, SOUP_STATUS_BAD_REQUEST)) {
+		gchar *detailed_error = NULL;
+
+		if (response_json && g_bytes_get_size (response_json) > 0) {
+			gchar *str;
+
+			str = g_strndup ((const gchar *) g_bytes_get_data (response_json, NULL), g_bytes_get_size (response_json));
+
+			if (!e_oauth2_service_extract_error_message (service, source, NULL, NULL, str, &detailed_error))
+				detailed_error = NULL;
+
+			g_free (str);
+		}
+
+		if (detailed_error && *detailed_error) {
+			g_set_error (error, G_IO_ERROR, G_IO_ERROR_CONNECTION_REFUSED,
+				_("Failed to refresh access token. Sign to the server again, please.\n\nDetailed error: %s"), detailed_error);
+		} else {
+			g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CONNECTION_REFUSED,
+				_("Failed to refresh access token. Sign to the server again, please."));
+		}
+
 		g_clear_error (&local_error);
+		g_free (detailed_error);
 	}
 
 	if (local_error)
@@ -1428,7 +1590,8 @@ e_oauth2_service_refresh_and_store_token_sync (EOAuth2Service *service,
 
 	g_object_unref (message);
 	g_object_unref (session);
-	e_util_safe_free_string (response_json);
+	if (response_json)
+		g_bytes_unref (response_json);
 
 	return success;
 }
@@ -1474,6 +1637,193 @@ e_oauth2_service_delete_token_sync (EOAuth2Service *service,
 	return success;
 }
 
+G_LOCK_DEFINE_STATIC (access_token_requests);
+static GHashTable *access_token_requests = NULL;
+static guint access_token_requests_free_id = 0;
+
+static gboolean
+eos_free_access_token_requests_timeout_cb (gpointer user_data)
+{
+	G_LOCK (access_token_requests);
+
+	if (access_token_requests && !g_hash_table_size (access_token_requests)) {
+		g_hash_table_destroy (access_token_requests);
+		access_token_requests = NULL;
+		access_token_requests_free_id = 0;
+	} else if (g_main_current_source () && access_token_requests_free_id == g_source_get_id (g_main_current_source ())) {
+		access_token_requests_free_id = 0;
+	}
+
+	G_UNLOCK (access_token_requests);
+
+	return FALSE;
+}
+
+typedef enum {
+	RESPONSE_UNKNOWN,
+	RESPONSE_SUCCESS,
+	RESPONSE_FAILURE
+} ResponseCode;
+
+typedef struct _AccessTokenRequest {
+	gint ref_count;
+	gboolean finished;
+	GCond cond;
+	GMutex mutex;
+	gchar *access_token;
+	gint expires_in;
+	GError *error;
+} AccessTokenRequest;
+
+static AccessTokenRequest *
+access_token_request_new (void)
+{
+	AccessTokenRequest *atr;
+
+	atr = g_slice_new0 (AccessTokenRequest);
+	atr->ref_count = 1;
+	atr->finished = FALSE;
+	g_cond_init (&atr->cond);
+	g_mutex_init (&atr->mutex);
+
+	return atr;
+}
+
+static void
+access_token_request_ref (AccessTokenRequest *atr)
+{
+	g_return_if_fail (atr != NULL);
+	g_atomic_int_inc (&atr->ref_count);
+}
+
+static void
+access_token_request_unref (AccessTokenRequest *atr)
+{
+	g_return_if_fail (atr != NULL);
+
+	if (g_atomic_int_dec_and_test (&atr->ref_count)) {
+		g_cond_clear (&atr->cond);
+		g_mutex_clear (&atr->mutex);
+		g_clear_pointer (&atr->access_token, e_util_safe_free_string);
+		g_clear_error (&atr->error);
+		g_slice_free (AccessTokenRequest, atr);
+	}
+}
+
+/* Hold access_token_requests when calling this */
+static ResponseCode
+eos_wait_for_access_token_request_locked (ESource *source,
+					  gchar **out_access_token,
+					  gint *out_expires_in,
+					  GCancellable *cancellable,
+					  GError **out_error)
+{
+	AccessTokenRequest *atr;
+	ResponseCode resp = RESPONSE_UNKNOWN;
+
+	if (!access_token_requests)
+		return RESPONSE_UNKNOWN;
+
+	atr = g_hash_table_lookup (access_token_requests, e_source_get_uid (source));
+	if (!atr)
+		return RESPONSE_UNKNOWN;
+
+	access_token_request_ref (atr);
+
+	G_UNLOCK (access_token_requests);
+
+	g_mutex_lock (&atr->mutex);
+
+	while (!atr->finished) {
+		/* Check once per second whether this request was not cancelled meanwhile */
+		g_cond_wait_until (&atr->cond, &atr->mutex, g_get_monotonic_time () + G_TIME_SPAN_SECOND);
+
+		if (g_cancellable_set_error_if_cancelled (cancellable, out_error)) {
+			resp = RESPONSE_FAILURE;
+			break;
+		}
+	}
+
+	g_mutex_unlock (&atr->mutex);
+
+	G_LOCK (access_token_requests);
+
+	if (resp == RESPONSE_UNKNOWN && !g_error_matches (atr->error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+		g_warn_if_fail (atr->finished);
+
+		if (atr->error) {
+			resp = RESPONSE_FAILURE;
+			if (out_error)
+				g_propagate_error (out_error, g_error_copy (atr->error));
+		} else {
+			resp = RESPONSE_SUCCESS;
+			*out_access_token = g_strdup (atr->access_token);
+			*out_expires_in = atr->expires_in;
+		}
+	}
+
+	access_token_request_unref (atr);
+
+	return resp;
+}
+
+/* Hold access_token_requests when calling this */
+static void
+eos_reserve_access_token_request_locked (ESource *source)
+{
+	AccessTokenRequest *atr;
+
+	if (!access_token_requests) {
+		access_token_requests = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) access_token_request_unref);
+	} else if (access_token_requests_free_id > 0) {
+		g_source_remove (access_token_requests_free_id);
+		access_token_requests_free_id = 0;
+	}
+
+	g_warn_if_fail (!g_hash_table_contains (access_token_requests, e_source_get_uid (source)));
+
+	atr = access_token_request_new ();
+
+	g_hash_table_insert (access_token_requests, e_source_dup_uid (source), atr);
+}
+
+/* Hold access_token_requests when calling this */
+static void
+eos_finish_access_token_request_locked (ESource *source,
+					const gchar *access_token,
+					gint expires_in,
+					const GError *error)
+{
+	AccessTokenRequest *atr;
+
+	g_return_if_fail (access_token_requests != NULL);
+
+	atr = g_hash_table_lookup (access_token_requests, e_source_get_uid (source));
+	g_return_if_fail (atr != NULL);
+
+	g_mutex_lock (&atr->mutex);
+	g_warn_if_fail (!atr->finished);
+	if (atr->finished) {
+		g_mutex_unlock (&atr->mutex);
+		return;
+	}
+
+	atr->access_token = g_strdup (access_token);
+	atr->expires_in = expires_in;
+	if (error)
+		atr->error = g_error_copy (error);
+	atr->finished = TRUE;
+
+	g_cond_broadcast (&atr->cond);
+	g_mutex_unlock (&atr->mutex);
+
+	g_hash_table_remove (access_token_requests, e_source_get_uid (source));
+
+	/* Free the hash table a minute after it had been used the last time */
+	if (!g_hash_table_size (access_token_requests))
+		access_token_requests_free_id = g_timeout_add_seconds (60, eos_free_access_token_requests_timeout_cb, NULL);
+}
+
 /**
  * e_oauth2_service_get_access_token_sync:
  * @service: an #EOAuth2Service
@@ -1505,7 +1855,11 @@ e_oauth2_service_get_access_token_sync (EOAuth2Service *service,
 					GCancellable *cancellable,
 					GError **error)
 {
+	ResponseCode resp;
 	gchar *refresh_token = NULL;
+	gchar *local_access_token = NULL;
+	gint local_expires_in = 0;
+	GError *local_error = NULL;
 	gboolean success = TRUE;
 
 	g_return_val_if_fail (E_IS_OAUTH2_SERVICE (service), FALSE);
@@ -1514,29 +1868,61 @@ e_oauth2_service_get_access_token_sync (EOAuth2Service *service,
 	g_return_val_if_fail (out_access_token != NULL, FALSE);
 	g_return_val_if_fail (out_expires_in != NULL, FALSE);
 
-	if (!eos_lookup_token_sync (service, source, &refresh_token, out_access_token, out_expires_in, cancellable, error))
-		return FALSE;
+	G_LOCK (access_token_requests);
+	resp = eos_wait_for_access_token_request_locked (source, out_access_token, out_expires_in, cancellable, error);
+	if (resp != RESPONSE_UNKNOWN && resp != RESPONSE_FAILURE && *out_expires_in <= TOKEN_VALIDITY_GAP_SECS) {
+		*out_expires_in = 0;
+	} else if (resp != RESPONSE_UNKNOWN) {
+		G_UNLOCK (access_token_requests);
 
-	if (*out_expires_in <= 0 && refresh_token) {
+		return resp != RESPONSE_FAILURE;
+	}
+
+	eos_reserve_access_token_request_locked (source);
+
+	G_UNLOCK (access_token_requests);
+
+	if (!eos_lookup_token_sync (service, source, &refresh_token, &local_access_token, &local_expires_in, cancellable, &local_error)) {
+		G_LOCK (access_token_requests);
+		eos_finish_access_token_request_locked (source, NULL, 0, local_error);
+		g_propagate_error (error, local_error);
+		G_UNLOCK (access_token_requests);
+		return FALSE;
+	}
+
+	if (local_expires_in <= TOKEN_VALIDITY_GAP_SECS && refresh_token) {
 		success = e_oauth2_service_refresh_and_store_token_sync (service, source, refresh_token,
-			ref_source, ref_source_user_data, cancellable, error);
+			ref_source, ref_source_user_data, cancellable, &local_error);
 
 		g_clear_pointer (&refresh_token, e_util_safe_free_string);
-		g_clear_pointer (out_access_token, e_util_safe_free_string);
+		g_clear_pointer (&local_access_token, e_util_safe_free_string);
 
-		success = success && eos_lookup_token_sync (service, source, &refresh_token, out_access_token, out_expires_in, cancellable, error);
+		success = success && eos_lookup_token_sync (service, source, &refresh_token, &local_access_token, &local_expires_in, cancellable, &local_error);
 	}
 
 	e_util_safe_free_string (refresh_token);
 
-	if (success && *out_expires_in <= 0) {
-		g_clear_pointer (out_access_token, e_util_safe_free_string);
+	if (success && local_expires_in <= 0) {
+		g_clear_pointer (&local_access_token, e_util_safe_free_string);
 
 		success = FALSE;
 
-		g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CONNECTION_REFUSED,
+		g_set_error_literal (&local_error, G_IO_ERROR, G_IO_ERROR_CONNECTION_REFUSED,
 			_("The access token is expired and it failed to refresh it. Sign to the server again, please."));
 	}
+
+	G_LOCK (access_token_requests);
+	if (success) {
+		g_warn_if_fail (local_error == NULL);
+		eos_finish_access_token_request_locked (source, local_access_token, local_expires_in, NULL);
+		*out_access_token = local_access_token;
+		*out_expires_in = local_expires_in;
+	} else {
+		g_warn_if_fail (local_access_token == NULL);
+		eos_finish_access_token_request_locked (source, NULL, 0, local_error);
+		g_propagate_error (error, local_error);
+	}
+	G_UNLOCK (access_token_requests);
 
 	return success;
 }
@@ -1601,3 +1987,252 @@ e_oauth2_service_util_take_to_form (GHashTable *form,
 	else
 		g_hash_table_remove (form, name);
 }
+
+static gboolean
+eos_util_extract_from_form (GHashTable *form,
+			    gchar **out_authorization_code,
+			    gchar **out_error_code,
+			    gchar **out_error_description)
+{
+	gboolean any_set = FALSE;
+	const gchar *value;
+
+	if (!form)
+		return FALSE;
+
+	value = g_hash_table_lookup (form, "code");
+
+	if (value && *value && out_authorization_code) {
+		any_set = TRUE;
+		*out_authorization_code = g_strdup (value);
+	} else {
+		value = g_hash_table_lookup (form, "error");
+
+		if (value && *value && out_error_code) {
+			any_set = TRUE;
+			*out_error_code = g_strdup (value);
+		}
+
+		value = g_hash_table_lookup (form, "error_description");
+
+		if (value && *value && out_error_description) {
+			any_set = TRUE;
+			*out_error_description = g_strdup (value);
+		}
+	}
+
+	return any_set;
+}
+
+/**
+ * e_oauth2_service_util_extract_from_uri:
+ * @in_uri: a URI returned from the server
+ * @out_authorization_code: (optional) (out) (transfer full) (nullable): extracted authorization code, can be %NULL
+ * @out_error_code: (optional) (out) (transfer full) (nullable): extracted error code, can be %NULL
+ * @out_error_description: (optional) (out) (transfer full) (nullable): extracted error description, can be %NULL
+ *
+ * Extracts either an authorization code from a 'code' argument of the @in_uri,
+ * or an error code from an 'error' argument of the @in_uri and an error description
+ * from the 'error_description' argument of the @in_uri.
+ *
+ * Returns: %TRUE, when any of the non-NULL out arguments had been populated.
+ *
+ * Since: 3.48
+ **/
+gboolean
+e_oauth2_service_util_extract_from_uri (const gchar *in_uri,
+					gchar **out_authorization_code,
+					gchar **out_error_code,
+					gchar **out_error_description)
+{
+	GUri *uri;
+	gboolean any_set = FALSE;
+
+	if (!in_uri || !*in_uri)
+		return FALSE;
+
+	uri = g_uri_parse (in_uri, SOUP_HTTP_URI_FLAGS | G_URI_FLAGS_PARSE_RELAXED, NULL);
+	if (!uri)
+		return FALSE;
+
+	if (g_uri_get_query (uri)) {
+		GHashTable *form = soup_form_decode (g_uri_get_query (uri));
+
+		if (form) {
+			any_set = eos_util_extract_from_form (form, out_authorization_code, out_error_code, out_error_description);
+
+			g_hash_table_unref (form);
+		}
+	}
+
+	if (!any_set && g_uri_get_fragment (uri)) {
+		GHashTable *form = soup_form_decode (g_uri_get_fragment (uri));
+
+		if (form) {
+			any_set = eos_util_extract_from_form (form, out_authorization_code, out_error_code, out_error_description);
+
+			g_hash_table_unref (form);
+		}
+	}
+
+	g_uri_unref (uri);
+
+	return any_set;
+}
+
+/**
+ * e_oauth2_service_util_compile_value:
+ * @compile_value: a value provided in the compile time
+ * @out_glob_buff: (out caller-allocates): a global buffer to store the processed value to
+ * @out_glob_buff_size: size of the @out_glob_buff
+ *
+ * Processes the @compile_value and returns the result, which is stored
+ * into the @out_glob_buff. The @out_glob_buff should be large enough to hold
+ * the processed value and it should be a global memory buffer (usually
+ * statically allocated) initialized to 0, which is used to short-circuit
+ * the call, because the processing is done only if the first element
+ * of the @out_glob_buff is 0, in all other cases the function
+ * immediately returns the @out_glob_buff.
+ *
+ * Returns: processed @compile_value, saved into *out_glob_buff
+ *
+ * Since: 3.46
+ **/
+#else  /* !BUILDING_VALUE_HELPER */
+static /* to not claim missing prototype */
+#endif /* !BUILDING_VALUE_HELPER */
+const gchar *
+e_oauth2_service_util_compile_value (const gchar *compile_value,
+				     gchar *out_glob_buff,
+				     gsize out_glob_buff_size)
+{
+	G_LOCK_DEFINE_STATIC (lock);
+
+	g_return_val_if_fail (out_glob_buff != NULL, NULL);
+	g_return_val_if_fail (out_glob_buff_size > 0, NULL);
+
+	if (!compile_value || !*compile_value) {
+		out_glob_buff[0] = '\0';
+		return out_glob_buff;
+	}
+
+	G_LOCK (lock);
+
+	if (!*out_glob_buff) {
+		if (g_str_has_prefix (compile_value, "|") &&
+		    g_str_has_suffix (compile_value, "|") && compile_value[1]) {
+			gchar *tmp = g_strndup (compile_value + 1, strlen (compile_value) - 2);
+			guchar *data;
+			gsize data_len = 0;
+
+			data = g_base64_decode (tmp, &data_len);
+			if (!data) {
+				g_warning ("Failed to decode base64 data");
+			} else if (!data_len) {
+				/* Nothing to decode */
+			} else if (out_glob_buff_size < data_len) {
+				g_warning ("global buffer size (%" G_GSIZE_FORMAT ") is not large enough, requires at least %" G_GSIZE_FORMAT " bytes",
+					out_glob_buff_size, (gsize) data_len);
+			} else {
+				guchar rval = data[data_len - 1];
+				guint ii;
+
+				for (ii = 0; ii < data_len; ii++) {
+					out_glob_buff[ii] = data[ii] ^ rval;
+				}
+			}
+			g_free (data);
+			g_free (tmp);
+		} else if (out_glob_buff_size < strlen (compile_value) + 1) {
+			g_warning ("global buffer size (%" G_GSIZE_FORMAT ") is not large enough, requires at least %" G_GSIZE_FORMAT " bytes",
+				out_glob_buff_size, (gsize) (strlen (compile_value) + 1));
+		} else {
+			strcpy (out_glob_buff, compile_value);
+		}
+	}
+
+	G_UNLOCK (lock);
+
+	return out_glob_buff;
+}
+
+#ifdef BUILDING_VALUE_HELPER
+#include <stdio.h>
+
+gint
+main (void)
+{
+	gchar chr;
+	GString *str;
+
+	str = g_string_new ("");
+
+	g_random_set_seed ((gint) (g_get_monotonic_time () + g_get_real_time ()));
+
+	while (chr = fgetc (stdin), !feof (stdin) || str->len) {
+		if (chr == '\n' || feof (stdin)) {
+			if (str->len) {
+				GByteArray *array;
+				const gchar *processed;
+				gchar *b64, *res, *test_buff;
+				gsize test_buff_size;
+				guchar rval;
+				guint ii;
+
+				while (rval = g_random_int_range (1, 255), !rval) {
+					;
+				}
+
+				array = g_byte_array_new ();
+
+				for (ii = 0; ii < str->len; ii++) {
+					guchar val = (guchar) str->str[ii];
+					val = val ^ rval;
+					g_byte_array_append (array, &val, 1);
+				}
+
+				g_byte_array_append (array, &rval, 1);
+
+				b64 = g_base64_encode (array->data, array->len);
+				res = g_strconcat ("|", b64, "|", NULL);
+
+				g_byte_array_unref (array);
+				g_free (b64);
+
+				test_buff_size = strlen (res) + 1;
+				test_buff = g_malloc0 (sizeof (gchar) * test_buff_size);
+
+				processed = e_oauth2_service_util_compile_value (res, test_buff, test_buff_size);
+				if (g_strcmp0 (processed, str->str) != 0) {
+					g_warning ("Failed to de-process '%s', stopping", str->str);
+					g_free (test_buff);
+					g_free (res);
+					break;
+				}
+
+				processed = e_oauth2_service_util_compile_value (res, test_buff, test_buff_size);
+				if (g_strcmp0 (processed, str->str) != 0) {
+					g_warning ("Failed to de-process '%s' for the second call, stopping", str->str);
+					g_free (test_buff);
+					g_free (res);
+					break;
+				}
+
+				printf ("%s ~> %s\n", str->str, res);
+
+				g_free (test_buff);
+				g_free (res);
+
+				g_string_truncate (str, 0);
+			}
+		} else if (chr != '\t' && chr != '\r' && chr != ' ') {
+			g_string_append_c (str, chr);
+		}
+	}
+
+	g_string_free (str, TRUE);
+
+	return 0;
+}
+
+#endif /* BUILDING_VALUE_HELPER */

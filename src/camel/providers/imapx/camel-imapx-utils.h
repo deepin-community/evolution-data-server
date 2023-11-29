@@ -153,8 +153,7 @@ gboolean	imapx_update_message_info_flags	(CamelMessageInfo *info,
 						 guint32 server_flags,
 						 const CamelNamedFlags *server_user_flags,
 						 guint32 permanent_flags,
-						 CamelFolder *folder,
-						 gboolean unsolicited);
+						 CamelFolder *folder);
 void		imapx_set_message_info_flags_for_new_message
 						(CamelMessageInfo *info,
 						 guint32 server_flags,
@@ -331,6 +330,7 @@ gchar *		camel_imapx_parse_mailbox	(CamelIMAPXInputStream *stream,
 						 GError **error);
 void		camel_imapx_normalize_mailbox	(gchar *mailbox_name,
 						 gchar separator);
+const gchar *	camel_imapx_normalize_inbox_name(const gchar *mailbox_name);
 gboolean	camel_imapx_mailbox_is_inbox	(const gchar *mailbox_name);
 gchar *		camel_imapx_mailbox_to_folder_path
 						(const gchar *mailbox_name,
@@ -411,6 +411,8 @@ gssize		imapx_splice_with_progress	(GOutputStream *output_stream,
 						 goffset file_size,
 						 GCancellable *cancellable,
 						 GError **error);
+const gchar *	imapx_rename_label_flag		(const gchar *flag,
+						 gboolean server_to_evo);
 
 G_END_DECLS
 

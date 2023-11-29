@@ -43,6 +43,7 @@
 #include "e-book-backend.h"
 #include "e-data-book-cursor-cache.h"
 #include "e-data-book-factory.h"
+#include "e-data-book-view-watcher-cache.h"
 
 #include "e-book-meta-backend.h"
 
@@ -76,6 +77,7 @@ struct _EBookMetaBackendPrivate {
 	gulong source_changed_id;
 	gulong notify_online_id;
 	gulong revision_changed_id;
+	gulong categories_changed_id;
 	guint refresh_timeout_id;
 
 	gboolean refresh_after_authenticate;
@@ -90,7 +92,7 @@ struct _EBookMetaBackendPrivate {
 	gchar *authentication_method;
 	gchar *authentication_proxy_uid;
 	gchar *authentication_credential_name;
-	SoupURI *webdav_soup_uri;
+	GUri *webdav_uri;
 
 	GSList *cursors;
 };
@@ -127,6 +129,58 @@ static gboolean ebmb_save_contact_wrapper_sync (EBookMetaBackend *meta_backend,
 						gchar **out_new_extra,
 						GCancellable *cancellable,
 						GError **error);
+static gboolean ebmb_maybe_remove_from_cache (EBookMetaBackend *meta_backend,
+					      EBookCache *book_cache,
+					      ECacheOfflineFlag offline_flag,
+					      const gchar *uid,
+					      guint32 opflags,
+					      GCancellable *cancellable,
+					      GError **error);
+
+static gboolean
+ebmb_is_power_saver_enabled (void)
+{
+#ifdef HAVE_GPOWERPROFILEMONITOR
+	GSettings *settings;
+	gboolean enabled = FALSE;
+
+	settings = g_settings_new ("org.gnome.evolution-data-server");
+
+	if (g_settings_get_boolean (settings, "limit-operations-in-power-saver-mode")) {
+		GPowerProfileMonitor *power_monitor;
+
+		power_monitor = g_power_profile_monitor_dup_default ();
+		enabled = power_monitor && g_power_profile_monitor_get_power_saver_enabled (power_monitor);
+		g_clear_object (&power_monitor);
+	}
+
+	g_clear_object (&settings);
+
+	return enabled;
+#else
+	return FALSE;
+#endif
+}
+
+static gboolean
+ebmb_can_run_on_metered_network (EBookMetaBackend *meta_backend)
+{
+	GNetworkMonitor *network_monitor;
+	EBackend *backend = E_BACKEND (meta_backend);
+	ESource *source;
+
+	network_monitor = e_backend_get_network_monitor (backend);
+
+	if (!g_network_monitor_get_network_metered (network_monitor))
+		return TRUE;
+
+	source = e_backend_get_source (backend);
+
+	if (!e_source_has_extension (source, E_SOURCE_EXTENSION_REFRESH))
+		return TRUE;
+
+	return e_source_refresh_get_enabled_on_metered_network (e_source_get_extension (source, E_SOURCE_EXTENSION_REFRESH));
+}
 
 /**
  * e_book_meta_backend_info_new:
@@ -165,7 +219,7 @@ e_book_meta_backend_info_new (const gchar *uid,
  * e_book_meta_backend_info_copy:
  * @src: (nullable): a source EBookMetaBackendInfo to copy, or %NULL
  *
- * Returns: (transfer full): Copy of the given @src. Free it with
+ * Returns: (transfer full) (nullable): Copy of the given @src. Free it with
  *    e_book_meta_backend_info_free() when no longer needed.
  *    If the @src is %NULL, then returns %NULL as well.
  *
@@ -262,7 +316,7 @@ ebmb_update_connection_values (EBookMetaBackend *meta_backend)
 	g_clear_pointer (&meta_backend->priv->authentication_method, g_free);
 	g_clear_pointer (&meta_backend->priv->authentication_proxy_uid, g_free);
 	g_clear_pointer (&meta_backend->priv->authentication_credential_name, g_free);
-	g_clear_pointer (&meta_backend->priv->webdav_soup_uri, (GDestroyNotify) soup_uri_free);
+	g_clear_pointer (&meta_backend->priv->webdav_uri, g_uri_unref);
 
 	if (source && e_source_has_extension (source, E_SOURCE_EXTENSION_AUTHENTICATION)) {
 		ESourceAuthentication *auth_extension;
@@ -282,7 +336,7 @@ ebmb_update_connection_values (EBookMetaBackend *meta_backend)
 
 		webdav_extension = e_source_get_extension (source, E_SOURCE_EXTENSION_WEBDAV_BACKEND);
 
-		meta_backend->priv->webdav_soup_uri = e_source_webdav_dup_soup_uri (webdav_extension);
+		meta_backend->priv->webdav_uri = e_source_webdav_dup_uri (webdav_extension);
 	}
 
 	g_mutex_unlock (&meta_backend->priv->property_lock);
@@ -460,17 +514,17 @@ ebmb_requires_reconnect (EBookMetaBackend *meta_backend)
 
 	if (!requires && e_source_has_extension (source, E_SOURCE_EXTENSION_WEBDAV_BACKEND)) {
 		ESourceWebdav *webdav_extension;
-		SoupURI *soup_uri;
+		GUri *g_uri;
 
 		webdav_extension = e_source_get_extension (source, E_SOURCE_EXTENSION_WEBDAV_BACKEND);
-		soup_uri = e_source_webdav_dup_soup_uri (webdav_extension);
+		g_uri = e_source_webdav_dup_uri (webdav_extension);
 
-		requires = (!meta_backend->priv->webdav_soup_uri && soup_uri) ||
-			(soup_uri && meta_backend->priv->webdav_soup_uri &&
-			!soup_uri_equal (meta_backend->priv->webdav_soup_uri, soup_uri));
+		requires = (!meta_backend->priv->webdav_uri && g_uri) ||
+			(g_uri && meta_backend->priv->webdav_uri &&
+			!soup_uri_equal (meta_backend->priv->webdav_uri, g_uri));
 
-		if (soup_uri)
-			soup_uri_free (soup_uri);
+		if (g_uri)
+			g_uri_unref (g_uri);
 	}
 
 	g_mutex_unlock (&meta_backend->priv->property_lock);
@@ -562,6 +616,25 @@ ebmb_start_view_thread_func (EBookBackend *book_backend,
 
 	if (g_cancellable_set_error_if_cancelled (cancellable, error))
 		return;
+
+	if ((e_data_book_view_get_flags (view) & E_BOOK_CLIENT_VIEW_FLAGS_MANUAL_QUERY) != 0) {
+		EBookMetaBackend *ebmb = E_BOOK_META_BACKEND (book_backend);
+		EBookClientViewSortFields *sort_fields;
+		GObject *view_watcher;
+		gsize view_id;
+
+		view_id = e_data_book_view_get_id (view);
+		sort_fields = e_book_backend_dup_view_sort_fields (book_backend, view_id);
+
+		view_watcher = e_data_book_view_watcher_cache_new (book_backend, ebmb->priv->cache, view);
+		e_data_book_view_watcher_cache_take_sort_fields (E_DATA_BOOK_VIEW_WATCHER_CACHE (view_watcher), sort_fields);
+
+		e_book_backend_take_view_user_data (book_backend, view_id, view_watcher);
+
+		e_data_book_view_notify_complete (view, NULL);
+
+		return;
+	}
 
 	/* Fill the view with known (locally stored) contacts satisfying the expression */
 	sexp = e_data_book_view_get_sexp (view);
@@ -661,9 +734,24 @@ ebmb_upload_local_changes_sync (EBookMetaBackend *meta_backend,
 
 			success = e_book_cache_get_contact (book_cache, change->uid, FALSE, &contact, cancellable, error);
 			if (success) {
+				GError *local_error = NULL;
+
 				success = ebmb_save_contact_wrapper_sync (meta_backend, book_cache,
 					change->state == E_OFFLINE_STATE_LOCALLY_MODIFIED,
-					conflict_resolution, contact, extra, opflags, change->uid, NULL, NULL, NULL, cancellable, error);
+					conflict_resolution, contact, extra, opflags, change->uid, NULL, NULL, NULL, cancellable, &local_error);
+
+				if (!success) {
+					if (g_error_matches (local_error, E_CLIENT_ERROR, E_CLIENT_ERROR_INVALID_ARG)) {
+						g_clear_error (&local_error);
+						success = TRUE;
+
+						if (!ebmb_maybe_remove_from_cache (meta_backend, book_cache, E_CACHE_IS_ONLINE, change->uid, 0, cancellable, NULL)) {
+							/* ignore any error here */
+						}
+					} else if (local_error) {
+						g_propagate_error (error, local_error);
+					}
+				}
 			}
 
 			g_clear_object (&contact);
@@ -674,7 +762,8 @@ ebmb_upload_local_changes_sync (EBookMetaBackend *meta_backend,
 				change->uid, extra, change->object, opflags, cancellable, &local_error);
 
 			if (!success) {
-				if (g_error_matches (local_error, E_BOOK_CLIENT_ERROR, E_BOOK_CLIENT_ERROR_CONTACT_NOT_FOUND)) {
+				if (g_error_matches (local_error, E_BOOK_CLIENT_ERROR, E_BOOK_CLIENT_ERROR_CONTACT_NOT_FOUND) ||
+				    g_error_matches (local_error, E_CLIENT_ERROR, E_CLIENT_ERROR_INVALID_ARG)) {
 					g_clear_error (&local_error);
 					success = TRUE;
 				} else if (local_error) {
@@ -727,7 +816,6 @@ ebmb_maybe_remove_from_cache (EBookMetaBackend *meta_backend,
 			      GCancellable *cancellable,
 			      GError **error)
 {
-	EBookBackend *book_backend;
 	EContact *contact = NULL;
 	GSList *local_photos, *link;
 	GError *local_error = NULL;
@@ -743,8 +831,6 @@ ebmb_maybe_remove_from_cache (EBookMetaBackend *meta_backend,
 		g_propagate_error (error, local_error);
 		return FALSE;
 	}
-
-	book_backend = E_BOOK_BACKEND (meta_backend);
 
 	if (!e_book_cache_remove_contact (book_cache, uid, opflags, offline_flag, cancellable, error)) {
 		g_object_unref (contact);
@@ -762,8 +848,7 @@ ebmb_maybe_remove_from_cache (EBookMetaBackend *meta_backend,
 
 	g_slist_free_full (local_photos, g_free);
 
-	e_book_backend_notify_remove (book_backend, uid);
-
+	e_book_backend_notify_remove (E_BOOK_BACKEND (meta_backend), uid);
 	ebmb_foreach_cursor (meta_backend, contact, e_data_book_cursor_contact_removed);
 
 	g_object_unref (contact);
@@ -779,9 +864,6 @@ ebmb_refresh_internal_sync (EBookMetaBackend *meta_backend,
 			    GCancellable *cancellable,
 			    GError **error)
 {
-#ifdef HAVE_GPOWERPROFILEMONITOR
-	GPowerProfileMonitor *power_monitor;
-#endif
 	EBookCache *book_cache;
 	gboolean success = FALSE, repeat = TRUE, is_repeat = FALSE;
 
@@ -790,17 +872,13 @@ ebmb_refresh_internal_sync (EBookMetaBackend *meta_backend,
 	if (g_cancellable_set_error_if_cancelled (cancellable, error))
 		goto done;
 
-#ifdef HAVE_GPOWERPROFILEMONITOR
-	/* Silently ignore the refresh request when in the power-saver mode */
-	power_monitor = g_power_profile_monitor_dup_default ();
-	if (power_monitor && g_power_profile_monitor_get_power_saver_enabled (power_monitor)) {
-		g_clear_object (&power_monitor);
+	/* Silently ignore the refresh request when in the power-saver mode
+	   or refresh on metered network is disabled */
+	if (ebmb_is_power_saver_enabled () ||
+	    !ebmb_can_run_on_metered_network (meta_backend)) {
 		success = TRUE;
 		goto done;
 	}
-
-	g_clear_object (&power_monitor);
-#endif
 
 	e_book_backend_foreach_view_notify_progress (E_BOOK_BACKEND (meta_backend), TRUE, 0, _("Refreshing…"));
 
@@ -1073,9 +1151,6 @@ ebmb_put_contact (EBookMetaBackend *meta_backend,
 
 	success = success && e_book_cache_put_contact (book_cache, contact, extra, opflags, offline_flag, cancellable, error);
 
-	if (success)
-		e_book_backend_notify_update (E_BOOK_BACKEND (meta_backend), contact);
-
 	g_clear_object (&existing_contact);
 
 	return success;
@@ -1088,6 +1163,7 @@ ebmb_load_contact_wrapper_sync (EBookMetaBackend *meta_backend,
 				const gchar *preloaded_object,
 				const gchar *preloaded_extra,
 				gchar **out_new_uid,
+				EContact **out_contact,
 				GCancellable *cancellable,
 				GError **error)
 {
@@ -1119,7 +1195,11 @@ ebmb_load_contact_wrapper_sync (EBookMetaBackend *meta_backend,
 	if (success && out_new_uid)
 		*out_new_uid = e_contact_get (contact, E_CONTACT_UID);
 
-	g_object_unref (contact);
+	if (success && out_contact)
+		*out_contact = contact;
+	else
+		g_object_unref (contact);
+
 	g_free (extra);
 
 	if (local_error) {
@@ -1170,7 +1250,7 @@ ebmb_save_contact_wrapper_sync (EBookMetaBackend *meta_backend,
 		gchar *loaded_uid = NULL;
 
 		success = ebmb_load_contact_wrapper_sync (meta_backend, book_cache, new_uid, NULL,
-			new_extra ? new_extra : extra, &loaded_uid, cancellable, error);
+			new_extra ? new_extra : extra, &loaded_uid, NULL, cancellable, error);
 
 		if (success && g_strcmp0 (loaded_uid, orig_uid) != 0)
 			success = ebmb_maybe_remove_from_cache (meta_backend, book_cache, E_CACHE_IS_ONLINE, orig_uid, opflags, cancellable, error);
@@ -1241,6 +1321,19 @@ ebmb_get_backend_property (EBookBackend *book_backend,
 		}
 
 		return g_string_free (fields, FALSE);
+	} else if (g_str_equal (prop_name, E_BOOK_BACKEND_PROPERTY_CATEGORIES)) {
+		EBookCache *book_cache;
+		gchar *categories = NULL;
+
+		book_cache = e_book_meta_backend_ref_cache (E_BOOK_META_BACKEND (book_backend));
+		if (book_cache) {
+			categories = e_book_cache_dup_categories (book_cache);
+			g_object_unref (book_cache);
+		} else {
+			g_warn_if_reached ();
+		}
+
+		return categories;
 	}
 
 	/* Chain up to parent's method. */
@@ -1320,6 +1413,18 @@ ebmb_refresh_sync (EBookBackendSync *book_backend,
 	if (!e_backend_get_online (backend))
 		return TRUE;
 
+	if (ebmb_is_power_saver_enabled ()) {
+		g_set_error_literal (error, E_CLIENT_ERROR, E_CLIENT_ERROR_OTHER_ERROR,
+			_("Refresh skipped due to enabled Power Saver mode. Disable Power Saver mode and repeat the action."));
+		return FALSE;
+	}
+
+	if (!ebmb_can_run_on_metered_network (meta_backend)) {
+		g_set_error_literal (error, E_CLIENT_ERROR, E_CLIENT_ERROR_OTHER_ERROR,
+			_("Refresh skipped due to being disabled on metered network."));
+		return FALSE;
+	}
+
 	success = e_book_meta_backend_ensure_connected_sync (meta_backend, cancellable, error);
 
 	if (success)
@@ -1382,13 +1487,10 @@ ebmb_create_contact_sync (EBookMetaBackend *meta_backend,
 		}
 	}
 
-	if (requires_put) {
+	if (requires_put)
 		success = e_book_cache_put_contact (book_cache, contact, new_extra, opflags, *offline_flag, cancellable, error);
-		if (success)
-			e_book_backend_notify_update (E_BOOK_BACKEND (meta_backend), contact);
-	} else {
+	else
 		success = TRUE;
-	}
 
 	if (success) {
 		if (out_new_uid)
@@ -1771,7 +1873,7 @@ ebmb_get_contact_sync (EBookBackendSync *book_backend,
 
 		/* Ignore errors here, just try whether it's on the remote side, but not in the local cache */
 		if (e_book_meta_backend_ensure_connected_sync (meta_backend, cancellable, NULL) &&
-		    ebmb_load_contact_wrapper_sync (meta_backend, book_cache, uid, NULL, NULL, &loaded_uid, cancellable, NULL)) {
+		    ebmb_load_contact_wrapper_sync (meta_backend, book_cache, uid, NULL, NULL, &loaded_uid, NULL, cancellable, NULL)) {
 			found = e_book_cache_get_contact (book_cache, loaded_uid, FALSE, &contact, cancellable, NULL);
 		}
 
@@ -1819,6 +1921,29 @@ ebmb_get_contact_list_uids_sync (EBookBackendSync *book_backend,
 	return e_book_meta_backend_search_uids_sync (E_BOOK_META_BACKEND (book_backend), query, out_uids, cancellable, error);
 }
 
+static gboolean
+ebmb_contains_email_sync (EBookBackendSync *book_backend,
+			  const gchar *email_address,
+			  GCancellable *cancellable,
+			  GError **error)
+{
+	EBookCache *cache;
+	gboolean found;
+
+	g_return_val_if_fail (E_IS_BOOK_META_BACKEND (book_backend), FALSE);
+	g_return_val_if_fail (email_address != NULL, FALSE);
+
+	cache = e_book_meta_backend_ref_cache (E_BOOK_META_BACKEND (book_backend));
+	if (!cache)
+		return FALSE;
+
+	found = e_book_cache_contains_email (cache, email_address, cancellable, error);
+
+	g_object_unref (cache);
+
+	return found;
+}
+
 static void
 ebmb_start_view (EBookBackend *book_backend,
 		 EDataBookView *view)
@@ -1842,6 +1967,8 @@ ebmb_stop_view (EBookBackend *book_backend,
 	GCancellable *cancellable;
 
 	g_return_if_fail (E_IS_BOOK_META_BACKEND (book_backend));
+
+	e_book_backend_take_view_user_data (book_backend, e_data_book_view_get_id (view), NULL);
 
 	cancellable = ebmb_steal_view_cancellable (E_BOOK_META_BACKEND (book_backend), view);
 	if (cancellable) {
@@ -2068,6 +2195,49 @@ ebmb_delete_cursor (EBookBackend *book_backend,
 	g_mutex_unlock (&meta_backend->priv->property_lock);
 
 	return link != NULL;
+}
+
+static void
+ebmb_set_view_sort_fields (EBookBackend *backend,
+			   gsize view_id,
+			   const EBookClientViewSortFields *fields)
+{
+	GObject *view_watcher;
+
+	g_return_if_fail (E_IS_BOOK_META_BACKEND (backend));
+
+	/* Chain up to parent's method */
+	E_BOOK_BACKEND_CLASS (e_book_meta_backend_parent_class)->impl_set_view_sort_fields (backend, view_id, fields);
+
+	view_watcher = e_book_backend_ref_view_user_data (backend, view_id);
+
+	if (E_IS_DATA_BOOK_VIEW_WATCHER_CACHE (view_watcher)) {
+		e_data_book_view_watcher_cache_take_sort_fields (E_DATA_BOOK_VIEW_WATCHER_CACHE (view_watcher),
+			e_book_client_view_sort_fields_copy (fields));
+	}
+
+	g_clear_object (&view_watcher);
+}
+
+static GPtrArray *
+ebmb_dup_view_contacts (EBookBackend *backend,
+			gsize view_id,
+			guint range_start,
+			guint range_length)
+{
+	GObject *view_watcher;
+	GPtrArray *contacts = NULL;
+
+	g_return_val_if_fail (E_IS_BOOK_META_BACKEND (backend), NULL);
+
+	view_watcher = e_book_backend_ref_view_user_data (backend, view_id);
+
+	if (E_IS_DATA_BOOK_VIEW_WATCHER_CACHE (view_watcher))
+		contacts = e_data_book_view_watcher_cache_dup_contacts (E_DATA_BOOK_VIEW_WATCHER_CACHE (view_watcher), range_start, range_length);
+
+	g_clear_object (&view_watcher);
+
+	return contacts;
 }
 
 static ESourceAuthenticationResult
@@ -2435,6 +2605,12 @@ e_book_meta_backend_dispose (GObject *object)
 		meta_backend->priv->revision_changed_id = 0;
 	}
 
+	if (meta_backend->priv->categories_changed_id) {
+		if (meta_backend->priv->cache)
+			g_signal_handler_disconnect (meta_backend->priv->cache, meta_backend->priv->categories_changed_id);
+		meta_backend->priv->categories_changed_id = 0;
+	}
+
 	g_hash_table_foreach (meta_backend->priv->view_cancellables, ebmb_cancel_view_cb, NULL);
 
 	if (meta_backend->priv->refresh_cancellable) {
@@ -2476,7 +2652,7 @@ e_book_meta_backend_finalize (GObject *object)
 	g_clear_pointer (&meta_backend->priv->authentication_method, g_free);
 	g_clear_pointer (&meta_backend->priv->authentication_proxy_uid, g_free);
 	g_clear_pointer (&meta_backend->priv->authentication_credential_name, g_free);
-	g_clear_pointer (&meta_backend->priv->webdav_soup_uri, (GDestroyNotify) soup_uri_free);
+	g_clear_pointer (&meta_backend->priv->webdav_uri, g_uri_unref);
 
 	g_mutex_clear (&meta_backend->priv->connect_lock);
 	g_mutex_clear (&meta_backend->priv->property_lock);
@@ -2513,6 +2689,7 @@ e_book_meta_backend_class_init (EBookMetaBackendClass *klass)
 	book_backend_sync_class->get_contact_sync = ebmb_get_contact_sync;
 	book_backend_sync_class->get_contact_list_sync = ebmb_get_contact_list_sync;
 	book_backend_sync_class->get_contact_list_uids_sync = ebmb_get_contact_list_uids_sync;
+	book_backend_sync_class->contains_email_sync = ebmb_contains_email_sync;
 
 	book_backend_class = E_BOOK_BACKEND_CLASS (klass);
 	book_backend_class->impl_get_backend_property = ebmb_get_backend_property;
@@ -2524,6 +2701,8 @@ e_book_meta_backend_class_init (EBookMetaBackendClass *klass)
 	book_backend_class->impl_dup_locale = ebmb_dup_locale;
 	book_backend_class->impl_create_cursor = ebmb_create_cursor;
 	book_backend_class->impl_delete_cursor = ebmb_delete_cursor;
+	book_backend_class->impl_set_view_sort_fields = ebmb_set_view_sort_fields;
+	book_backend_class->impl_dup_view_contacts = ebmb_dup_view_contacts;
 
 	backend_class = E_BACKEND_CLASS (klass);
 	backend_class->authenticate_sync = ebmb_authenticate_sync;
@@ -2782,6 +2961,32 @@ e_book_meta_backend_dup_sync_tag (EBookMetaBackend *meta_backend)
 	return sync_tag;
 }
 
+/**
+ * e_book_meta_backend_set_sync_tag:
+ * @meta_backend: an #EBookMetaBackend
+ * @sync_tag: (nullable): a sync tag to set, or %NULL to unset the old one
+ *
+ * Sets the @sync_tag for the @meta_backend.
+ *
+ * Since: 3.50
+ **/
+void
+e_book_meta_backend_set_sync_tag (EBookMetaBackend *meta_backend,
+				  const gchar *sync_tag)
+{
+	EBookCache *book_cache;
+
+	g_return_if_fail (E_IS_BOOK_META_BACKEND (meta_backend));
+
+	book_cache = e_book_meta_backend_ref_cache (meta_backend);
+	if (!book_cache)
+		return;
+
+	e_cache_set_key (E_CACHE (book_cache), EBMB_KEY_SYNC_TAG, sync_tag, NULL);
+
+	g_clear_object (&book_cache);
+}
+
 static void
 ebmb_cache_revision_changed_cb (ECache *cache,
 				gpointer user_data)
@@ -2798,6 +3003,19 @@ ebmb_cache_revision_changed_cb (ECache *cache,
 			E_BOOK_BACKEND_PROPERTY_REVISION, revision);
 		g_free (revision);
 	}
+}
+
+static void
+ebmb_cache_categories_changed_cb (EBookCache *book_cache,
+				  const gchar *categories,
+				  gpointer user_data)
+{
+	EBookMetaBackend *meta_backend = user_data;
+
+	g_return_if_fail (E_IS_BOOK_META_BACKEND (meta_backend));
+
+	e_book_backend_notify_property_changed (E_BOOK_BACKEND (meta_backend),
+		E_BOOK_BACKEND_PROPERTY_CATEGORIES, categories);
 }
 
 /**
@@ -2833,6 +3051,8 @@ e_book_meta_backend_set_cache (EBookMetaBackend *meta_backend,
 	if (meta_backend->priv->cache) {
 		g_signal_handler_disconnect (meta_backend->priv->cache,
 			meta_backend->priv->revision_changed_id);
+		g_signal_handler_disconnect (meta_backend->priv->cache,
+			meta_backend->priv->categories_changed_id);
 	}
 
 	g_clear_object (&meta_backend->priv->cache);
@@ -2840,6 +3060,8 @@ e_book_meta_backend_set_cache (EBookMetaBackend *meta_backend,
 
 	meta_backend->priv->revision_changed_id = g_signal_connect_object (meta_backend->priv->cache,
 		"revision-changed", G_CALLBACK (ebmb_cache_revision_changed_cb), meta_backend, 0);
+	meta_backend->priv->categories_changed_id = g_signal_connect_object (meta_backend->priv->cache,
+		"categories-changed", G_CALLBACK (ebmb_cache_categories_changed_cb), meta_backend, 0);
 
 	g_mutex_unlock (&meta_backend->priv->property_lock);
 
@@ -3556,6 +3778,7 @@ e_book_meta_backend_process_changes_sync (EBookMetaBackend *meta_backend,
 					  GCancellable *cancellable,
 					  GError **error)
 {
+	EBookBackend *backend;
 	EBookCache *book_cache;
 	GHashTable *covered_uids;
 	GString *invalid_objects = NULL;
@@ -3567,6 +3790,7 @@ e_book_meta_backend_process_changes_sync (EBookMetaBackend *meta_backend,
 	book_cache = e_book_meta_backend_ref_cache (meta_backend);
 	g_return_val_if_fail (book_cache != NULL, FALSE);
 
+	backend = E_BOOK_BACKEND (meta_backend);
 	covered_uids = g_hash_table_new (g_str_hash, g_str_equal);
 
 	/* Removed objects first */
@@ -3584,6 +3808,7 @@ e_book_meta_backend_process_changes_sync (EBookMetaBackend *meta_backend,
 	/* Then modified objects */
 	for (link = (GSList *) modified_objects; link && success; link = g_slist_next (link)) {
 		EBookMetaBackendInfo *nfo = link->data;
+		EContact *contact = NULL;
 		GError *local_error = NULL;
 
 		if (!nfo || !nfo->uid || !*nfo->uid ||
@@ -3592,7 +3817,12 @@ e_book_meta_backend_process_changes_sync (EBookMetaBackend *meta_backend,
 
 		g_hash_table_insert (covered_uids, nfo->uid, NULL);
 
-		success = ebmb_load_contact_wrapper_sync (meta_backend, book_cache, nfo->uid, nfo->object, nfo->extra, NULL, cancellable, &local_error);
+		success = ebmb_load_contact_wrapper_sync (meta_backend, book_cache, nfo->uid, nfo->object, nfo->extra, NULL, &contact, cancellable, &local_error);
+
+		if (contact) {
+			e_book_backend_notify_update (backend, contact);
+			g_clear_object (&contact);
+		}
 
 		/* Do not stop on invalid objects, just notify about them later, and load as many as possible */
 		if (!success && g_error_matches (local_error, E_CLIENT_ERROR, E_CLIENT_ERROR_INVALID_ARG)) {
@@ -3614,12 +3844,18 @@ e_book_meta_backend_process_changes_sync (EBookMetaBackend *meta_backend,
 	/* Finally created objects */
 	for (link = (GSList *) created_objects; link && success; link = g_slist_next (link)) {
 		EBookMetaBackendInfo *nfo = link->data;
+		EContact *contact = NULL;
 		GError *local_error = NULL;
 
 		if (!nfo || !nfo->uid || !*nfo->uid)
 			continue;
 
-		success = ebmb_load_contact_wrapper_sync (meta_backend, book_cache, nfo->uid, nfo->object, nfo->extra, NULL, cancellable, &local_error);
+		success = ebmb_load_contact_wrapper_sync (meta_backend, book_cache, nfo->uid, nfo->object, nfo->extra, NULL, &contact, cancellable, &local_error);
+
+		if (contact) {
+			e_book_backend_notify_update (backend, contact);
+			g_clear_object (&contact);
+		}
 
 		/* Do not stop on invalid objects, just notify about them later, and load as many as possible */
 		if (!success && g_error_matches (local_error, E_CLIENT_ERROR, E_CLIENT_ERROR_INVALID_ARG)) {

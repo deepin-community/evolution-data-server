@@ -362,7 +362,8 @@ typedef enum {
 	CAMEL_PROVIDER_CONF_LABEL,
 	CAMEL_PROVIDER_CONF_HIDDEN,
 	CAMEL_PROVIDER_CONF_OPTIONS,
-	CAMEL_PROVIDER_CONF_PLACEHOLDER
+	CAMEL_PROVIDER_CONF_PLACEHOLDER,
+	CAMEL_PROVIDER_CONF_ADVANCED_SECTION_START
 } CamelProviderConfType;
 
 /**
@@ -496,7 +497,8 @@ typedef enum { /*< flags >*/
 	CAMEL_STORE_CAN_EDIT_FOLDERS = 1 << 5,
 	CAMEL_STORE_USE_CACHE_DIR = 1 << 6,
 	CAMEL_STORE_CAN_DELETE_FOLDERS_AT_ONCE = 1 << 7,
-	CAMEL_STORE_SUPPORTS_INITIAL_SETUP = 1 << 8
+	CAMEL_STORE_SUPPORTS_INITIAL_SETUP = 1 << 8,
+	CAMEL_STORE_IS_BUILTIN = 1 << 9
 } CamelStoreFlags;
 
 /**
@@ -591,5 +593,27 @@ typedef enum {
 	CAMEL_TIME_UNIT_MONTHS,
 	CAMEL_TIME_UNIT_YEARS
 } CamelTimeUnit;
+
+/**
+ * CamelGpgTrust:
+ * @CAMEL_GPG_TRUST_NONE: no trust set
+ * @CAMEL_GPG_TRUST_UNKNOWN: unknown trust level
+ * @CAMEL_GPG_TRUST_NEVER: never trust the key
+ * @CAMEL_GPG_TRUST_MARGINAL: marginally trust the key
+ * @CAMEL_GPG_TRUST_FULL: fully trust the key
+ * @CAMEL_GPG_TRUST_ULTIMATE: ultimately trust the key
+ *
+ * GPG key trust levels.
+ *
+ * Since: 3.50
+ **/
+typedef enum {
+	CAMEL_GPG_TRUST_NONE		= 0,
+	CAMEL_GPG_TRUST_UNKNOWN		= 1,
+	CAMEL_GPG_TRUST_NEVER		= 2,
+	CAMEL_GPG_TRUST_MARGINAL	= 3,
+	CAMEL_GPG_TRUST_FULL		= 4,
+	CAMEL_GPG_TRUST_ULTIMATE	= 5
+} CamelGpgTrust;
 
 #endif /* CAMEL_ENUMS_H */

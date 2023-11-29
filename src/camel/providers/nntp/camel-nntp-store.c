@@ -1208,7 +1208,7 @@ nntp_store_get_folder_info_all (CamelNNTPStore *nntp_store,
 			memcpy (date + 7, nntp_store_summary->last_newslist + 8, 6); /* HHMMSS */
 			date[13] = '\0';
 
-			/* Some servers don't support date (!), so fallback if they dont */
+			/* Some servers don't support date (!), so fallback if they don't */
 			if (!nntp_get_date (nntp_store, cancellable, NULL))
 				goto do_complete_list_nodate;
 
@@ -1442,6 +1442,9 @@ nntp_migrate_to_user_cache_dir (CamelService *service)
 			/* return back the .ev-store-summary file, it's saved in user_data_dir */
 			if (g_rename (ucd_ev_store_summary, udd_ev_store_summary) == -1)
 				g_debug ("%s: Failed to return back '%s' to '%s': %s", G_STRFUNC, ucd_ev_store_summary, udd_ev_store_summary, g_strerror (errno));
+
+			g_free (udd_ev_store_summary);
+			g_free (ucd_ev_store_summary);
 		}
 	}
 
@@ -1874,7 +1877,7 @@ camel_nntp_store_ref_summary (CamelNNTPStore *nntp_store)
  * Returns the currently selected newsgroup name, or %NULL if no newsgroup
  * is selected.
  *
- * Returns: the currently selected newsgroup name, or %NULL
+ * Returns: (nullable): the currently selected newsgroup name, or %NULL
  **/
 const gchar *
 camel_nntp_store_get_current_group (CamelNNTPStore *nntp_store)
@@ -1893,7 +1896,7 @@ camel_nntp_store_get_current_group (CamelNNTPStore *nntp_store)
  *
  * The returned string should be freed with g_free() when no longer needed.
  *
- * Returns: a newly-allocated string, or %NULL
+ * Returns: (nullable): a newly-allocated string, or %NULL
  **/
 gchar *
 camel_nntp_store_dup_current_group (CamelNNTPStore *nntp_store)
@@ -1916,7 +1919,7 @@ camel_nntp_store_dup_current_group (CamelNNTPStore *nntp_store)
 /**
  * camel_nntp_store_set_current_group:
  * @nntp_store: a #CamelNNTPStore
- * @current_group: a newsgroup name
+ * @current_group: (nullable): a newsgroup name
  *
  * Sets the name of the currently selected newsgroup.
  **/

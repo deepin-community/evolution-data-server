@@ -47,6 +47,8 @@ struct _CamelIMAPXSettingsPrivate {
 	gboolean ignore_other_users_namespace;
 	gboolean ignore_shared_folders_namespace;
 	gboolean full_update_on_metered_network;
+	gboolean send_client_id;
+	gboolean single_client_mode;
 
 	CamelSortType fetch_order;
 };
@@ -79,7 +81,9 @@ enum {
 	PROP_USE_SUBSCRIPTIONS,
 	PROP_IGNORE_OTHER_USERS_NAMESPACE,
 	PROP_IGNORE_SHARED_FOLDERS_NAMESPACE,
-	PROP_FULL_UPDATE_ON_METERED_NETWORK
+	PROP_FULL_UPDATE_ON_METERED_NETWORK,
+	PROP_SEND_CLIENT_ID,
+	PROP_SINGLE_CLIENT_MODE
 };
 
 G_DEFINE_TYPE_WITH_CODE (
@@ -255,6 +259,18 @@ imapx_settings_set_property (GObject *object,
 
 		case PROP_FULL_UPDATE_ON_METERED_NETWORK:
 			camel_imapx_settings_set_full_update_on_metered_network (
+				CAMEL_IMAPX_SETTINGS (object),
+				g_value_get_boolean (value));
+			return;
+
+		case PROP_SEND_CLIENT_ID:
+			camel_imapx_settings_set_send_client_id (
+				CAMEL_IMAPX_SETTINGS (object),
+				g_value_get_boolean (value));
+			return;
+
+		case PROP_SINGLE_CLIENT_MODE:
+			camel_imapx_settings_set_single_client_mode (
 				CAMEL_IMAPX_SETTINGS (object),
 				g_value_get_boolean (value));
 			return;
@@ -456,6 +472,20 @@ imapx_settings_get_property (GObject *object,
 			g_value_set_boolean (
 				value,
 				camel_imapx_settings_get_full_update_on_metered_network (
+				CAMEL_IMAPX_SETTINGS (object)));
+			return;
+
+		case PROP_SEND_CLIENT_ID:
+			g_value_set_boolean (
+				value,
+				camel_imapx_settings_get_send_client_id (
+				CAMEL_IMAPX_SETTINGS (object)));
+			return;
+
+		case PROP_SINGLE_CLIENT_MODE:
+			g_value_set_boolean (
+				value,
+				camel_imapx_settings_get_single_client_mode (
 				CAMEL_IMAPX_SETTINGS (object)));
 			return;
 	}
@@ -810,6 +840,32 @@ camel_imapx_settings_class_init (CamelIMAPXSettingsClass *class)
 			G_PARAM_CONSTRUCT |
 			G_PARAM_EXPLICIT_NOTIFY |
 			G_PARAM_STATIC_STRINGS));
+
+	g_object_class_install_property (
+		object_class,
+		PROP_SEND_CLIENT_ID,
+		g_param_spec_boolean (
+			"send-client-id",
+			"Send Client ID",
+			"Whether to send client ID to the server",
+			FALSE,
+			G_PARAM_READWRITE |
+			G_PARAM_CONSTRUCT |
+			G_PARAM_EXPLICIT_NOTIFY |
+			G_PARAM_STATIC_STRINGS));
+
+	g_object_class_install_property (
+		object_class,
+		PROP_SINGLE_CLIENT_MODE,
+		g_param_spec_boolean (
+			"single-client-mode",
+			"Single Client Mode",
+			"When set to true, does full folder flags refresh only once per day",
+			FALSE,
+			G_PARAM_READWRITE |
+			G_PARAM_CONSTRUCT |
+			G_PARAM_EXPLICIT_NOTIFY |
+			G_PARAM_STATIC_STRINGS));
 }
 
 static void
@@ -831,10 +887,10 @@ camel_imapx_settings_init (CamelIMAPXSettings *settings)
  *
  * Since: 3.20
  **/
-guint
+gboolean
 camel_imapx_settings_get_use_multi_fetch (CamelIMAPXSettings *settings)
 {
-	g_return_val_if_fail (CAMEL_IS_IMAPX_SETTINGS (settings), 0);
+	g_return_val_if_fail (CAMEL_IS_IMAPX_SETTINGS (settings), FALSE);
 
 	return settings->priv->use_multi_fetch;
 }
@@ -850,7 +906,7 @@ camel_imapx_settings_get_use_multi_fetch (CamelIMAPXSettings *settings)
  **/
 void
 camel_imapx_settings_set_use_multi_fetch (CamelIMAPXSettings *settings,
-					  guint use_multi_fetch)
+					  gboolean use_multi_fetch)
 {
 	g_return_if_fail (CAMEL_IS_IMAPX_SETTINGS (settings));
 
@@ -1174,7 +1230,7 @@ camel_imapx_settings_set_filter_junk_inbox (CamelIMAPXSettings *settings,
  *
  * Returns the custom IMAP namespace in which to find folders.
  *
- * Returns: the custom IMAP namespace, or %NULL
+ * Returns: (nullable): the custom IMAP namespace, or %NULL
  *
  * Since: 3.2
  **/
@@ -1195,7 +1251,7 @@ camel_imapx_settings_get_namespace (CamelIMAPXSettings *settings)
  *
  * The returned string should be freed with g_free() when no longer needed.
  *
- * Returns: a newly-allocated copy of #CamelIMAPXSettings:namespace
+ * Returns: (nullable): a newly-allocated copy of #CamelIMAPXSettings:namespace
  *
  * Since: 3.4
  **/
@@ -1220,7 +1276,7 @@ camel_imapx_settings_dup_namespace (CamelIMAPXSettings *settings)
 /**
  * camel_imapx_settings_set_namespace:
  * @settings: a #CamelIMAPXSettings
- * @namespace_: an IMAP namespace, or %NULL
+ * @namespace_: (nullable): an IMAP namespace, or %NULL
  *
  * Sets the custom IMAP namespace in which to find folders.  If @namespace_
  * is %NULL, the default namespace is used.
@@ -1259,7 +1315,7 @@ camel_imapx_settings_set_namespace (CamelIMAPXSettings *settings,
  * Returns the path to a real, non-virtual Junk folder to be used instead
  * of Camel's standard virtual Junk folder.
  *
- * Returns: path to a real junk folder
+ * Returns: (nullable): path to a real junk folder
  *
  * Since: 3.8
  **/
@@ -1280,7 +1336,7 @@ camel_imapx_settings_get_real_junk_path (CamelIMAPXSettings *settings)
  *
  * The returned string should be freed with g_free() when no longer needed.
  *
- * Returns: a newly-allocated copy of #CamelIMAPXSettings:real-junk-path
+ * Returns: (nullable): a newly-allocated copy of #CamelIMAPXSettings:real-junk-path
  *
  * Since: 3.8
  **/
@@ -1305,7 +1361,7 @@ camel_imapx_settings_dup_real_junk_path (CamelIMAPXSettings *settings)
 /**
  * camel_imapx_settings_set_real_junk_path:
  * @settings: a #CamelIMAPXSettings
- * @real_junk_path: path to a real Junk folder, or %NULL
+ * @real_junk_path: (nullable): path to a real Junk folder, or %NULL
  *
  * Sets the path to a real, non-virtual Junk folder to be used instead of
  * Camel's standard virtual Junk folder.
@@ -1339,7 +1395,7 @@ camel_imapx_settings_set_real_junk_path (CamelIMAPXSettings *settings,
  * Returns the path to a real, non-virtual Trash folder to be used instead
  * of Camel's standard virtual Trash folder.
  *
- * Returns: path to a real Trash folder
+ * Returns: (nullable): path to a real Trash folder
  *
  * Since: 3.8
  **/
@@ -1360,7 +1416,7 @@ camel_imapx_settings_get_real_trash_path (CamelIMAPXSettings *settings)
  *
  * The returned string should be freed with g_free() when no longer needed.
  *
- * Returns: a newly-allocated copy of #CamelIMAPXsettings:real-trash-path
+ * Returns: (nullable): a newly-allocated copy of #CamelIMAPXsettings:real-trash-path
  *
  * Since: 3.8
  **/
@@ -1385,7 +1441,7 @@ camel_imapx_settings_dup_real_trash_path (CamelIMAPXSettings *settings)
 /**
  * camel_imapx_settings_set_real_trash_path:
  * @settings: a #CamelIMAPXSettings
- * @real_trash_path: path to a real Trash folder, or %NULL
+ * @real_trash_path: (nullable): path to a real Trash folder, or %NULL
  *
  * Sets the path to a real, non-virtual Trash folder to be used instead of
  * Camel's standard virtual Trash folder.
@@ -1425,7 +1481,7 @@ camel_imapx_settings_set_real_trash_path (CamelIMAPXSettings *settings,
  * this option menas or how to use it.  Probably not worth exposing in a
  * graphical interface.
  *
- * Returns: shell command for connecting to the server, or %NULL
+ * Returns: (nullable): shell command for connecting to the server, or %NULL
  *
  * Since: 3.2
  **/
@@ -1446,7 +1502,7 @@ camel_imapx_settings_get_shell_command (CamelIMAPXSettings *settings)
  *
  * The returned string should be freed with g_free() when no longer needed.
  *
- * Returns: a newly-allocated copy of #CamelIMAPXSettings:shell-command
+ * Returns: (nullable): a newly-allocated copy of #CamelIMAPXSettings:shell-command
  *
  * Since: 3.4
  **/
@@ -1471,7 +1527,7 @@ camel_imapx_settings_dup_shell_command (CamelIMAPXSettings *settings)
 /**
  * camel_imapx_settings_set_shell_command:
  * @settings: a #CamelIMAPXSettings
- * @shell_command: shell command for connecting to the server, or %NULL
+ * @shell_command: (nullable): shell command for connecting to the server, or %NULL
  *
  * Sets an optional shell command used to establish an input/output stream
  * with an IMAP server.  Normally the input/output stream is established
@@ -1952,4 +2008,88 @@ camel_imapx_settings_set_full_update_on_metered_network (CamelIMAPXSettings *set
 	settings->priv->full_update_on_metered_network = full_update_on_metered_network;
 
 	g_object_notify (G_OBJECT (settings), "full-update-on-metered-network");
+}
+
+/**
+ * camel_imapx_settings_get_send_client_id:
+ * @settings: a #CamelIMAPXSettings
+ *
+ * Returns whether to send client ID to the server, using the 'ID' extension (RFC 2971).
+ *
+ * Returns: whether to send client ID to the server
+ *
+ * Since: 3.44
+ **/
+gboolean
+camel_imapx_settings_get_send_client_id (CamelIMAPXSettings *settings)
+{
+	g_return_val_if_fail (CAMEL_IS_IMAPX_SETTINGS (settings), FALSE);
+
+	return settings->priv->send_client_id;
+}
+
+/**
+ * camel_imapx_settings_set_send_client_id:
+ * @settings: a #CamelIMAPXSettings
+ * @send_client_id: whether to send client ID to the server
+ *
+ * Sets whether to send client ID to the server, using the 'ID' extension (RFC 2971).
+ *
+ * Since: 3.44
+ **/
+void
+camel_imapx_settings_set_send_client_id (CamelIMAPXSettings *settings,
+					 gboolean send_client_id)
+{
+	g_return_if_fail (CAMEL_IS_IMAPX_SETTINGS (settings));
+
+	if ((settings->priv->send_client_id ? 1 : 0) == (send_client_id ? 1 : 0))
+		return;
+
+	settings->priv->send_client_id = send_client_id;
+
+	g_object_notify (G_OBJECT (settings), "send-client-id");
+}
+
+/**
+ * camel_imapx_settings_get_single_client_mode:
+ * @settings: a #CamelIMAPXSettings
+ *
+ * Returns whether using single client mode. That is, the full folder refresh
+ * flags are done only once per day, not on each folder refresh.
+ *
+ * Returns: whether the single client mode is enabled
+ *
+ * Since: 3.50
+ **/
+gboolean
+camel_imapx_settings_get_single_client_mode (CamelIMAPXSettings *settings)
+{
+	g_return_val_if_fail (CAMEL_IS_IMAPX_SETTINGS (settings), FALSE);
+
+	return settings->priv->single_client_mode;
+}
+
+/**
+ * camel_imapx_settings_set_single_client_mode:
+ * @settings: a #CamelIMAPXSettings
+ * @single_client_mode: value to set
+ *
+ * Sets whether to use a single client mode. See camel_imapx_settings_get_single_client_mode()
+ * for an explanation what it means.
+ *
+ * Since: 3.50
+ **/
+void
+camel_imapx_settings_set_single_client_mode (CamelIMAPXSettings *settings,
+					     gboolean single_client_mode)
+{
+	g_return_if_fail (CAMEL_IS_IMAPX_SETTINGS (settings));
+
+	if ((settings->priv->single_client_mode ? 1 : 0) == (single_client_mode ? 1 : 0))
+		return;
+
+	settings->priv->single_client_mode = single_client_mode;
+
+	g_object_notify (G_OBJECT (settings), "single-client-mode");
 }

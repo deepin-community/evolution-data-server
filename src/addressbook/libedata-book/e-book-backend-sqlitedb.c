@@ -314,7 +314,7 @@ book_backend_sql_exec_real (sqlite3 *db,
                             GError **error)
 {
 	gchar *errmsg = NULL;
-	gint ret = -1, retries = 0;
+	gint ret, retries = 0;
 
 	ret = sqlite3_exec (db, stmt, callback, data, &errmsg);
 	while (ret == SQLITE_BUSY || ret == SQLITE_LOCKED || ret == -1) {
@@ -536,7 +536,7 @@ create_folders_table (EBookBackendSqliteDB *ebsdb,
 	gint version = 0;
 	LocaleColumns locale_columns = { FALSE, FALSE };
 
-	/* sync_data points to syncronization data, it could be last_modified
+	/* sync_data points to synchronization data, it could be last_modified
 	 * time or a sequence number or some text depending on the backend.
 	 *
 	 * partial_content says whether the contents are partially downloaded
@@ -1111,9 +1111,11 @@ create_contacts_table (EBookBackendSqliteDB *ebsdb,
 		sqlite3_free (stmt);
 
 		/* Give the UID an index in this table, always */
-		stmt = sqlite3_mprintf ("CREATE INDEX IF NOT EXISTS LISTINDEX ON %Q (uid)", tmp);
-		success = book_backend_sql_exec (ebsdb->priv->db, stmt, NULL, NULL, error);
-		sqlite3_free (stmt);
+		if (success) {
+			stmt = sqlite3_mprintf ("CREATE INDEX IF NOT EXISTS LISTINDEX ON %Q (uid)", tmp);
+			success = book_backend_sql_exec (ebsdb->priv->db, stmt, NULL, NULL, error);
+			sqlite3_free (stmt);
+		}
 
 		/* Create indexes if specified */
 		if (success && (ebsdb->priv->attr_list_indexes & INDEX_PREFIX) != 0) {
@@ -1154,7 +1156,7 @@ create_contacts_table (EBookBackendSqliteDB *ebsdb,
 			g_free (tmp);
 
 			/* For any indexed column, also index the localized column */
-			if (ebsdb->priv->summary_fields[i].field != E_CONTACT_REV) {
+			if (success && ebsdb->priv->summary_fields[i].field != E_CONTACT_REV) {
 				tmp = g_strdup_printf (
 					"INDEX_%s_localized_%s",
 					summary_dbname_from_field (ebsdb, ebsdb->priv->summary_fields[i].field),
@@ -1184,7 +1186,7 @@ create_contacts_table (EBookBackendSqliteDB *ebsdb,
 			g_free (tmp);
 		}
 
-		if ((ebsdb->priv->summary_fields[i].index & INDEX_PHONE) != 0 &&
+		if (success && (ebsdb->priv->summary_fields[i].index & INDEX_PHONE) != 0 &&
 		    ebsdb->priv->summary_fields[i].type != E_TYPE_CONTACT_ATTR_LIST) {
 			/* Derive index name from field & folder */
 			tmp = g_strdup_printf (
@@ -1237,7 +1239,6 @@ create_contacts_table (EBookBackendSqliteDB *ebsdb,
 
 		if (success && g_strcmp0 (current_region, stored_region) != 0) {
 			success = upgrade_contacts_table (ebsdb, folderid, current_region, lc_collate, error);
-			relocalized = TRUE;
 		}
 
 		g_free (stored_region);
@@ -2032,7 +2033,7 @@ convert_phone (const gchar *normal,
 	gint country_code = 0;
 
 	if (number) {
-		EPhoneNumberCountrySource source;
+		EPhoneNumberCountrySource source = E_PHONE_NUMBER_COUNTRY_FROM_DEFAULT;
 
 		national_number = e_phone_number_get_national_number (number);
 		country_code = e_phone_number_get_country_code (number, &source);
@@ -2646,7 +2647,7 @@ e_book_backend_sqlitedb_remove_contacts (EBookBackendSqliteDB *ebsdb,
 	}
 
 	/* Delete the auxillary contact infos first */
-	if (success && ebsdb->priv->have_attr_list) {
+	if (ebsdb->priv->have_attr_list) {
 		gchar *lists_folder = g_strdup_printf ("%s_lists", folderid);
 
 		stmt = generate_delete_stmt (lists_folder, uids);
@@ -4803,7 +4804,7 @@ e_book_backend_sqlitedb_set_has_partial_content (EBookBackendSqliteDB *ebsdb,
  * not being present in @ebsdb, you must pass the @error parameter and
  * check whether it was set by this function.</para></note>
  *
- * Returns: (transfer full): The extra data previously set for @uid, or %NULL
+ * Returns: (transfer full): The extra data previously set for @uid, or %NULL on error
  *
  * Since: 3.2
  *
@@ -5093,7 +5094,7 @@ e_book_backend_sqlitedb_set_key_value (EBookBackendSqliteDB *ebsdb,
  *
  * Obsolete, do not use, this always ends with an error.
  *
- * Returns: (element-type utf8) (transfer full): %NULL
+ * Returns: (element-type utf8) (transfer full): %NULL on error
  *
  * Since: 3.2
  *
@@ -5312,7 +5313,9 @@ upgrade_contacts_table (EBookBackendSqliteDB *ebsdb,
 		success = book_backend_sql_exec (
 			ebsdb->priv->db, stmt, NULL, NULL, error);
 		sqlite3_free (stmt);
+	}
 
+	if (success) {
 		stmt = sqlite3_mprintf (
 			"UPDATE folders SET lc_collate = %Q WHERE folder_id = %Q",
 			lc_collate, folderid);
@@ -6004,7 +6007,7 @@ cursor_count_position_locked (EBookBackendSqliteDB *ebsdb,
  * e_book_backend_sqlitedb_cursor_new: (skip)
  * @ebsdb: An #EBookBackendSqliteDB
  * @folderid: folder id of the address-book
- * @sexp: search expression; use NULL or an empty string to get all stored contacts.
+ * @sexp: (nullable): search expression; use %NULL or an empty string to get all stored contacts.
  * @sort_fields: (array length=n_sort_fields): An array of #EContactFields as sort keys in order of priority
  * @sort_types: (array length=n_sort_fields): An array of #EBookCursorSortTypes, one for each field in @sort_fields
  * @n_sort_fields: The number of fields to sort results by.

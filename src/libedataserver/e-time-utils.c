@@ -1564,12 +1564,16 @@ correct_two_digit_year (struct tm *result,
 		*two_digit_year = FALSE;
 
 	/* If a 2-digit year was used we use the current century. */
-	if (result->tm_year < 0 && result->tm_year < -1800) {
+	if (result->tm_year < -1800 && result->tm_year >= -1900) {
 		time_t t = time (NULL);
 		struct tm *today_tm = localtime (&t);
 
-		/* This should convert it into a value from 0 to 99. */
+		/* This converts it into a value from 0 to 99. */
 		result->tm_year += 1900;
+
+		/* When the year is after the next year, then expect it be the previous century */
+		if ((today_tm->tm_year % 100) + 1 < result->tm_year)
+			result->tm_year -= 100;
 
 		/* Now add on the century. */
 		result->tm_year += today_tm->tm_year
@@ -1599,13 +1603,15 @@ locale_supports_12_hour_format (void)
 	tmp_tm.tm_wday = 6;
 	tmp_tm.tm_yday = 6;
 
-	e_utf8_strftime (s, sizeof (s), "%p", &tmp_tm);
+	if (!e_utf8_strftime (s, sizeof (s), "%p", &tmp_tm))
+		s[0] = '\0';
 
 	if (!s[0]) {
 		tmp_tm.tm_hour = 13;
 		tmp_tm.tm_min = 0;
 
-		e_utf8_strftime (s, sizeof (s), "%p", &tmp_tm);
+		if (!e_utf8_strftime (s, sizeof (s), "%p", &tmp_tm))
+			s[0] = '\0';
 	}
 
 	return s[0] != '\0';
@@ -1884,6 +1890,47 @@ e_time_parse_date (const gchar *value,
                    struct tm *result)
 {
 	return e_time_parse_date_ex (value, result, NULL);
+}
+
+/**
+ * e_time_parse_date_format:
+ * @value: a date string
+ * @format: a strftime() format string to use to parse the @value
+ * @out_result: (out): return value for the parsed date
+ * @out_two_digit_year: (out) (optional): set to %TRUE, if parsing with two-digit year, else %FALSE,
+ *    but only when not %NULL
+ *
+ * Parses @value using the @format saving the parsed date into @out_result.
+ * Optionally sets whether there had been used two-digit year.
+ *
+ * Returns: An #ETimeParseStatus result code indicating whether
+ *    the @value was an empty string, a valid date, or an invalid date.
+ *
+ * Since: 3.50
+ **/
+ETimeParseStatus
+e_time_parse_date_format (const gchar *value,
+			  const gchar *format,
+			  struct tm *out_result,
+			  gboolean *out_two_digit_year)
+{
+	const gchar *formats[1];
+	ETimeParseStatus status;
+
+	g_return_val_if_fail (value != NULL, E_TIME_PARSE_INVALID);
+	g_return_val_if_fail (out_result != NULL, E_TIME_PARSE_INVALID);
+
+	formats[0] = format;
+
+	status = parse_with_strptime (value, out_result, formats, 1);
+
+	if (status == E_TIME_PARSE_OK && !has_correct_date (out_result))
+		status = E_TIME_PARSE_INVALID;
+
+	if (status == E_TIME_PARSE_OK)
+		correct_two_digit_year (out_result, out_two_digit_year);
+
+	return status;
 }
 
 /**

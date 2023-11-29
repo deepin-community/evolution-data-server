@@ -114,6 +114,19 @@ gboolean	e_source_openpgp_get_prefer_inline
 void		e_source_openpgp_set_prefer_inline
 						(ESourceOpenPGP *extension,
 						 gboolean prefer_inline);
+gboolean	e_source_openpgp_get_locate_keys(ESourceOpenPGP *extension);
+void		e_source_openpgp_set_locate_keys(ESourceOpenPGP *extension,
+						 gboolean locate_keys);
+gboolean	e_source_openpgp_get_send_public_key
+						(ESourceOpenPGP *extension);
+void		e_source_openpgp_set_send_public_key
+						(ESourceOpenPGP *extension,
+						 gboolean send_public_key);
+gboolean	e_source_openpgp_get_send_prefer_encrypt
+						(ESourceOpenPGP *extension);
+void		e_source_openpgp_set_send_prefer_encrypt
+						(ESourceOpenPGP *extension,
+						 gboolean send_prefer_encrypt);
 
 G_END_DECLS
 

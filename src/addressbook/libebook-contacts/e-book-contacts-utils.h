@@ -70,6 +70,16 @@
 #define E_BOOK_BACKEND_PROPERTY_REVISION		"revision"
 
 /**
+ * E_BOOK_BACKEND_PROPERTY_CATEGORIES: (value "categories")
+ *
+ * Provides comma-separated list of all known categories used by
+ * the contacts stored in the book backend.
+ *
+ * Since: 3.48
+ **/
+#define E_BOOK_BACKEND_PROPERTY_CATEGORIES		"categories"
+
+/**
  * E_BOOK_CLIENT_ERROR:
  *
  * Error domain for #EBookClient errors
@@ -113,6 +123,38 @@ EConflictResolution
 						(guint32 flags); /* bit-or of EBookOperationFlags */
 guint32		e_book_util_conflict_resolution_to_operation_flags /* bit-or of EBookOperationFlags */
 						(EConflictResolution conflict_resolution);
+
+void		e_book_util_foreach_address	(const gchar *email_address,
+						 GHRFunc func,
+						 gpointer user_data);
+void		e_book_util_diff_categories	(EContact *old_contact,
+						 EContact *new_contact,
+						 GHashTable **out_added, /* const gchar *category ~> 1 */
+						 GHashTable **out_removed); /* const gchar *category ~> 1 */
+
+#define E_TYPE_BOOK_INDICES (e_book_indices_get_type ())
+typedef struct _EBookIndices {
+	gchar *chr;
+	guint index; /* 0-based */
+} EBookIndices;
+
+EBookIndices *	e_book_indices_copy		(const EBookIndices *src);
+void		e_book_indices_free		(EBookIndices *indices);
+GType		e_book_indices_get_type		(void);
+
+#define E_TYPE_BOOK_CLIENT_VIEW_SORT_FIELDS (e_book_client_view_sort_fields_get_type ())
+typedef struct _EBookClientViewSortFields {
+	EContactField field;
+	EBookCursorSortType sort_type;
+} EBookClientViewSortFields;
+
+EBookClientViewSortFields *
+		e_book_client_view_sort_fields_copy
+						(const EBookClientViewSortFields *src);
+void		e_book_client_view_sort_fields_free
+						(EBookClientViewSortFields *fields);
+GType		e_book_client_view_sort_fields_get_type
+						(void);
 
 #ifndef EDS_DISABLE_DEPRECATED
 

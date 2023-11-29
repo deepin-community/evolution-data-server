@@ -21,6 +21,7 @@
 #include <glib/gi18n-lib.h>
 
 #include <libebackend/libebackend.h>
+#include <libedataserverui/libedataserverui.h>
 
 #include "trust-prompt.h"
 
@@ -95,23 +96,34 @@ trust_prompt_response_cb (GtkWidget *dialog,
 	e_user_prompter_server_extension_response (extension, prompt_id, response, NULL);
 }
 
+static void
+_init_icon_theme (void)
+{
+	static gboolean icons_added = FALSE;
+
+	if (!icons_added) {
+		icons_added = TRUE;
+
+		gtk_icon_theme_append_search_path (gtk_icon_theme_get_default (), E_DATA_SERVER_ICONDIR);
+	}
+}
+
 gboolean
 trust_prompt_show (EUserPrompterServerExtension *extension,
                    gint prompt_id,
                    const gchar *host,
                    const gchar *markup,
-                   GcrParsed *parsed,
+                   const gchar *base64_certificate_der,
                    const gchar *reason)
 {
-	GcrCertificateWidget *certificate_widget;
-	GcrCertificate *certificate;
-	GckAttributes *attributes;
+	guchar *certificate_der;
+	gsize certificate_der_len = 0;
 	GtkWidget *dialog, *widget;
 	GtkGrid *grid;
-	const guchar *data;
-	gsize length;
 	gchar *tmp;
 	gint row = 0;
+
+	_init_icon_theme ();
 
 	dialog = gtk_dialog_new_with_buttons (
 		_("Certificate trust..."), NULL, 0,
@@ -171,19 +183,16 @@ trust_prompt_show (EUserPrompterServerExtension *extension,
 
 	trust_prompt_add_info_line (grid, _("Reason:"), reason, FALSE, &row);
 
-	data = gcr_parsed_get_data (parsed, &length);
-	attributes = gcr_parsed_get_attributes (parsed);
+	widget = e_certificate_widget_new ();
 
-	certificate = gcr_simple_certificate_new (data, length);
+	certificate_der = g_base64_decode (base64_certificate_der, &certificate_der_len);
+	if (certificate_der) {
+		e_certificate_widget_set_der (E_CERTIFICATE_WIDGET (widget), certificate_der, certificate_der_len);
+		g_free (certificate_der);
+	}
 
-	certificate_widget = gcr_certificate_widget_new (certificate);
-	gcr_certificate_widget_set_attributes (certificate_widget, attributes);
-
-	widget = GTK_WIDGET (certificate_widget);
 	gtk_grid_attach (grid, widget, 1, row, 2, 1);
 	gtk_widget_show (widget);
-
-	g_clear_object (&certificate);
 
 	g_object_set_data (G_OBJECT (dialog), TRUST_PROMP_ID_KEY, GINT_TO_POINTER (prompt_id));
 

@@ -88,7 +88,7 @@ struct _ECalMetaBackendPrivate {
 	gchar *authentication_method;
 	gchar *authentication_proxy_uid;
 	gchar *authentication_credential_name;
-	SoupURI *webdav_soup_uri;
+	GUri *webdav_parsed_uri;
 };
 
 enum {
@@ -110,6 +110,13 @@ static ICalTimezone *	(* ecmb_timezone_cache_parent_get_timezone) (ETimezoneCach
 static GList *		(* ecmb_timezone_cache_parent_list_timezones) (ETimezoneCache *cache);
 
 /* Forward Declarations */
+static gboolean		ecmb_maybe_remove_from_cache	(ECalMetaBackend *meta_backend,
+							 ECalCache *cal_cache,
+							 ECacheOfflineFlag offline_flag,
+							 const gchar *uid,
+							 guint32 custom_flags,
+							 GCancellable *cancellable,
+							 GError **error);
 static void e_cal_meta_backend_timezone_cache_init (ETimezoneCacheInterface *iface);
 
 G_DEFINE_ABSTRACT_TYPE_WITH_CODE (ECalMetaBackend, e_cal_meta_backend, E_TYPE_CAL_BACKEND_SYNC,
@@ -141,6 +148,52 @@ static gboolean ecmb_save_component_wrapper_sync (ECalMetaBackend *meta_backend,
 						  gchar **out_new_extra,
 						  GCancellable *cancellable,
 						  GError **error);
+
+static gboolean
+ecmb_is_power_saver_enabled (void)
+{
+#ifdef HAVE_GPOWERPROFILEMONITOR
+	GSettings *settings;
+	gboolean enabled = FALSE;
+
+	settings = g_settings_new ("org.gnome.evolution-data-server");
+
+	if (g_settings_get_boolean (settings, "limit-operations-in-power-saver-mode")) {
+		GPowerProfileMonitor *power_monitor;
+
+		power_monitor = g_power_profile_monitor_dup_default ();
+		enabled = power_monitor && g_power_profile_monitor_get_power_saver_enabled (power_monitor);
+		g_clear_object (&power_monitor);
+	}
+
+	g_clear_object (&settings);
+
+	return enabled;
+#else
+	return FALSE;
+#endif
+}
+
+
+static gboolean
+ecmb_can_run_on_metered_network (ECalMetaBackend *meta_backend)
+{
+	GNetworkMonitor *network_monitor;
+	EBackend *backend = E_BACKEND (meta_backend);
+	ESource *source;
+
+	network_monitor = e_backend_get_network_monitor (backend);
+
+	if (!g_network_monitor_get_network_metered (network_monitor))
+		return TRUE;
+
+	source = e_backend_get_source (backend);
+
+	if (!e_source_has_extension (source, E_SOURCE_EXTENSION_REFRESH))
+		return TRUE;
+
+	return e_source_refresh_get_enabled_on_metered_network (e_source_get_extension (source, E_SOURCE_EXTENSION_REFRESH));
+}
 
 /**
  * e_cal_meta_backend_info_new:
@@ -276,7 +329,7 @@ ecmb_update_connection_values (ECalMetaBackend *meta_backend)
 	g_clear_pointer (&meta_backend->priv->authentication_method, g_free);
 	g_clear_pointer (&meta_backend->priv->authentication_proxy_uid, g_free);
 	g_clear_pointer (&meta_backend->priv->authentication_credential_name, g_free);
-	g_clear_pointer (&meta_backend->priv->webdav_soup_uri, (GDestroyNotify) soup_uri_free);
+	g_clear_pointer (&meta_backend->priv->webdav_parsed_uri, g_uri_unref);
 
 	if (source && e_source_has_extension (source, E_SOURCE_EXTENSION_AUTHENTICATION)) {
 		ESourceAuthentication *auth_extension;
@@ -296,7 +349,7 @@ ecmb_update_connection_values (ECalMetaBackend *meta_backend)
 
 		webdav_extension = e_source_get_extension (source, E_SOURCE_EXTENSION_WEBDAV_BACKEND);
 
-		meta_backend->priv->webdav_soup_uri = e_source_webdav_dup_soup_uri (webdav_extension);
+		meta_backend->priv->webdav_parsed_uri = e_source_webdav_dup_uri (webdav_extension);
 	}
 
 	g_mutex_unlock (&meta_backend->priv->property_lock);
@@ -474,17 +527,17 @@ ecmb_requires_reconnect (ECalMetaBackend *meta_backend)
 
 	if (!requires && e_source_has_extension (source, E_SOURCE_EXTENSION_WEBDAV_BACKEND)) {
 		ESourceWebdav *webdav_extension;
-		SoupURI *soup_uri;
+		GUri *parsed_uri;
 
 		webdav_extension = e_source_get_extension (source, E_SOURCE_EXTENSION_WEBDAV_BACKEND);
-		soup_uri = e_source_webdav_dup_soup_uri (webdav_extension);
+		parsed_uri = e_source_webdav_dup_uri (webdav_extension);
 
-		requires = (!meta_backend->priv->webdav_soup_uri && soup_uri) ||
-			(soup_uri && meta_backend->priv->webdav_soup_uri &&
-			!soup_uri_equal (meta_backend->priv->webdav_soup_uri, soup_uri));
+		requires = (!meta_backend->priv->webdav_parsed_uri && parsed_uri) ||
+			(parsed_uri && meta_backend->priv->webdav_parsed_uri &&
+			!soup_uri_equal (meta_backend->priv->webdav_parsed_uri, parsed_uri));
 
-		if (soup_uri)
-			soup_uri_free (soup_uri);
+		if (parsed_uri)
+			g_uri_unref (parsed_uri);
 	}
 
 	g_mutex_unlock (&meta_backend->priv->property_lock);
@@ -580,9 +633,24 @@ ecmb_upload_local_changes_sync (ECalMetaBackend *meta_backend,
 
 			success = e_cal_cache_get_components_by_uid (cal_cache, change->uid, &instances, cancellable, error);
 			if (success) {
+				GError *local_error = NULL;
+
 				success = ecmb_save_component_wrapper_sync (meta_backend, cal_cache,
 					change->state == E_OFFLINE_STATE_LOCALLY_MODIFIED,
-					conflict_resolution, instances, extra, opflags, change->uid, NULL, NULL, NULL, cancellable, error);
+					conflict_resolution, instances, extra, opflags, change->uid, NULL, NULL, NULL, cancellable, &local_error);
+
+				if (!success) {
+					if (g_error_matches (local_error, E_CAL_CLIENT_ERROR, E_CAL_CLIENT_ERROR_INVALID_OBJECT)) {
+						g_clear_error (&local_error);
+						success = TRUE;
+
+						if (!ecmb_maybe_remove_from_cache (meta_backend, cal_cache, E_CACHE_IS_ONLINE, change->uid, 0, cancellable, NULL)) {
+							/* ignore any error here */
+						}
+					} else if (local_error) {
+						g_propagate_error (error, local_error);
+					}
+				}
 			}
 
 			g_slist_free_full (instances, g_object_unref);
@@ -593,7 +661,8 @@ ecmb_upload_local_changes_sync (ECalMetaBackend *meta_backend,
 				change->uid, extra, change->object, opflags, cancellable, &local_error);
 
 			if (!success) {
-				if (g_error_matches (local_error, E_CAL_CLIENT_ERROR, E_CAL_CLIENT_ERROR_OBJECT_NOT_FOUND)) {
+				if (g_error_matches (local_error, E_CAL_CLIENT_ERROR, E_CAL_CLIENT_ERROR_OBJECT_NOT_FOUND) ||
+				    g_error_matches (local_error, E_CAL_CLIENT_ERROR, E_CAL_CLIENT_ERROR_INVALID_OBJECT)) {
 					g_clear_error (&local_error);
 					success = TRUE;
 				} else if (local_error) {
@@ -680,9 +749,6 @@ ecmb_refresh_internal_sync (ECalMetaBackend *meta_backend,
 			    GCancellable *cancellable,
 			    GError **error)
 {
-#ifdef HAVE_GPOWERPROFILEMONITOR
-	GPowerProfileMonitor *power_monitor;
-#endif
 	ECalCache *cal_cache;
 	gboolean success = FALSE, repeat = TRUE, is_repeat = FALSE;
 
@@ -691,17 +757,13 @@ ecmb_refresh_internal_sync (ECalMetaBackend *meta_backend,
 	if (g_cancellable_set_error_if_cancelled (cancellable, error))
 		goto done;
 
-#ifdef HAVE_GPOWERPROFILEMONITOR
-	/* Silently ignore the refresh request when in the power-saver mode */
-	power_monitor = g_power_profile_monitor_dup_default ();
-	if (power_monitor && g_power_profile_monitor_get_power_saver_enabled (power_monitor)) {
-		g_clear_object (&power_monitor);
+	/* Silently ignore the refresh request when in the power-saver mode
+	   or refresh on metered network is disabled */
+	if (ecmb_is_power_saver_enabled () ||
+	    !ecmb_can_run_on_metered_network (meta_backend)) {
 		success = TRUE;
 		goto done;
 	}
-
-	g_clear_object (&power_monitor);
-#endif
 
 	e_cal_backend_foreach_view_notify_progress (E_CAL_BACKEND (meta_backend), TRUE, 0, _("Refreshing…"));
 
@@ -1345,6 +1407,18 @@ ecmb_refresh_sync (ECalBackendSync *sync_backend,
 	if (!e_backend_get_online (backend))
 		return;
 
+	if (ecmb_is_power_saver_enabled ()) {
+		g_set_error_literal (error, E_CLIENT_ERROR, E_CLIENT_ERROR_OTHER_ERROR,
+			_("Refresh skipped due to enabled Power Saver mode. Disable Power Saver mode and repeat the action."));
+		return;
+	}
+
+	if (!ecmb_can_run_on_metered_network (meta_backend)) {
+		g_set_error_literal (error, E_CLIENT_ERROR, E_CLIENT_ERROR_OTHER_ERROR,
+			_("Refresh skipped due to being disabled on metered network."));
+		return;
+	}
+
 	if (e_cal_meta_backend_ensure_connected_sync (meta_backend, cancellable, error))
 		e_cal_meta_backend_schedule_refresh (meta_backend);
 }
@@ -1892,6 +1966,13 @@ ecmb_modify_object_sync (ECalMetaBackend *meta_backend,
 		instances = g_slist_append (instances, e_cal_component_clone (comp));
 		break;
 	case E_CAL_OBJ_MOD_ALL:
+		if (e_cal_component_is_instance (comp)) {
+			g_set_error_literal (error, E_CAL_CLIENT_ERROR, E_CAL_CLIENT_ERROR_INVALID_OBJECT,
+				_("Cannot modify all instances from a detached instance. Modify a series instance instead."));
+			success = FALSE;
+			break;
+		}
+
 		e_cal_recur_ensure_end_dates (comp, TRUE, e_cal_cache_resolve_timezone_cb, cal_cache, cancellable, NULL);
 
 		/* Replace master object */
@@ -2549,6 +2630,14 @@ ecmb_receive_object_sync (ECalMetaBackend *meta_backend,
 	case I_CAL_METHOD_REPLY:
 		is_declined = e_cal_backend_user_declined (registry, e_cal_component_get_icalcomponent (comp));
 		if (is_in_cache) {
+			if (is_declined) {
+				GSettings *settings;
+
+				settings = g_settings_new ("org.gnome.evolution-data-server.calendar");
+				is_declined = g_settings_get_boolean (settings, "delete-meeting-on-decline");
+				g_clear_object (&settings);
+			}
+
 			if (!is_declined) {
 				success = ecmb_modify_object_sync (meta_backend, cal_cache, offline_flag, conflict_resolution,
 					mod, opflags, comp, NULL, NULL, cancellable, error);
@@ -3433,7 +3522,7 @@ e_cal_meta_backend_finalize (GObject *object)
 	g_clear_pointer (&meta_backend->priv->authentication_method, g_free);
 	g_clear_pointer (&meta_backend->priv->authentication_proxy_uid, g_free);
 	g_clear_pointer (&meta_backend->priv->authentication_credential_name, g_free);
-	g_clear_pointer (&meta_backend->priv->webdav_soup_uri, (GDestroyNotify) soup_uri_free);
+	g_clear_pointer (&meta_backend->priv->webdav_parsed_uri, g_uri_unref);
 
 	g_mutex_clear (&meta_backend->priv->connect_lock);
 	g_mutex_clear (&meta_backend->priv->property_lock);
@@ -3746,6 +3835,32 @@ e_cal_meta_backend_dup_sync_tag (ECalMetaBackend *meta_backend)
 	g_clear_object (&cal_cache);
 
 	return sync_tag;
+}
+
+/**
+ * e_cal_meta_backend_set_sync_tag:
+ * @meta_backend: an #ECalMetaBackend
+ * @sync_tag: (nullable): a sync tag to set, or %NULL to unset the old one
+ *
+ * Sets the @sync_tag for the @meta_backend.
+ *
+ * Since: 3.50
+ **/
+void
+e_cal_meta_backend_set_sync_tag (ECalMetaBackend *meta_backend,
+				 const gchar *sync_tag)
+{
+	ECalCache *cal_cache;
+
+	g_return_if_fail (E_IS_CAL_META_BACKEND (meta_backend));
+
+	cal_cache = e_cal_meta_backend_ref_cache (meta_backend);
+	if (!cal_cache)
+		return;
+
+	e_cache_set_key (E_CACHE (cal_cache), ECMB_KEY_SYNC_TAG, sync_tag, NULL);
+
+	g_clear_object (&cal_cache);
 }
 
 static void

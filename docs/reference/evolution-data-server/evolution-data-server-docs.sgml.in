@@ -119,6 +119,7 @@
       <xi:include href="xml/e-source-task-list.xml"/>
       <xi:include href="xml/e-source-uoa.xml"/>
       <xi:include href="xml/e-source-webdav.xml"/>
+      <xi:include href="xml/e-source-webdav-notes.xml"/>
       <xi:include href="xml/e-source-weather.xml"/>
       <xi:include href="xml/e-source-backend-summary-setup.xml"/>
     </chapter>
@@ -173,6 +174,7 @@
       <xi:include href="xml/e-backend-enums.xml"/>
       <xi:include href="xml/e-backend-factory.xml"/>
       <xi:include href="xml/e-cache.xml"/>
+      <xi:include href="xml/e-cache-keys.xml"/>
       <xi:include href="xml/e-data-factory.xml"/>
       <xi:include href="xml/e-dbus-server.xml"/>
       <xi:include href="xml/e-extensible.xml"/>
@@ -208,6 +210,9 @@
       <xi:include href="xml/e-data-book-cursor-sqlite.xml"/>
       <xi:include href="xml/e-data-book-factory.xml"/>
       <xi:include href="xml/e-data-book-view.xml"/>
+      <xi:include href="xml/e-data-book-view-watcher-cache.xml"/>
+      <xi:include href="xml/e-data-book-view-watcher-memory.xml"/>
+      <xi:include href="xml/e-data-book-view-watcher-sqlite.xml"/>
       <xi:include href="xml/e-subprocess-book-factory.xml"/>
       <xi:include href="xml/e-system-locale-watcher.xml"/>
     </chapter>
@@ -242,13 +247,15 @@
       <xi:include href="xml/e-error.xml"/>
       <xi:include href="xml/e-flag.xml"/>
       <xi:include href="xml/e-free-form-exp.xml"/>
-      <xi:include href="xml/e-gdata-oauth2-authorizer.xml"/>
+      <xi:include href="xml/e-gdata-query.xml"/>
+      <xi:include href="xml/e-gdata-session.xml"/>
+      <xi:include href="xml/e-json-utils.xml"/>
       <xi:include href="xml/e-memory.xml"/>
+      <xi:include href="xml/e-named-parameters.xml"/>
       <xi:include href="xml/e-network-monitor.xml"/>
       <xi:include href="xml/e-operation-pool.xml"/>
       <xi:include href="xml/e-secret-store.xml"/>
       <xi:include href="xml/e-sexp.xml"/>
-      <xi:include href="xml/e-soup-logger.xml"/>
       <xi:include href="xml/e-soup-session.xml"/>
       <xi:include href="xml/e-soup-ssl-trust.xml"/>
       <xi:include href="xml/e-source-registry-watcher.xml"/>
@@ -287,6 +294,7 @@
       <title>Addressbook related utilities</title>
       <xi:include href="xml/e-book-contacts-enums.xml"/>
       <xi:include href="xml/e-book-contacts-utils.xml"/>
+      <xi:include href="xml/e-book-indices-updater.xml"/>
       <xi:include href="xml/e-destination.xml"/>
       <xi:include href="xml/e-address-western.xml"/>
       <xi:include href="xml/e-name-western.xml"/>
@@ -333,7 +341,6 @@
       <xi:include href="xml/e-iterator.xml"/>
       <xi:include href="xml/e-list.xml"/>
       <xi:include href="xml/e-list-iterator.xml"/>
-      <xi:include href="xml/e-proxy.xml"/>
       <xi:include href="xml/e-url.xml"/>
     </chapter>
     <chapter>
@@ -360,6 +367,22 @@
   <index id="api-index-deprecated" role="deprecated">
     <title>Index of deprecated symbols</title>
     <xi:include href="xml/api-index-deprecated.xml"><xi:fallback /></xi:include>
+  </index>
+  <index id="api-index-3-50" role="3.50">
+    <title>Index of new symbols in 3.50</title>
+    <xi:include href="xml/api-index-3.50.xml"><xi:fallback /></xi:include>
+  </index>
+  <index id="api-index-3-48" role="3.48">
+    <title>Index of new symbols in 3.48</title>
+    <xi:include href="xml/api-index-3.48.xml"><xi:fallback /></xi:include>
+  </index>
+  <index id="api-index-3-46" role="3.46">
+    <title>Index of new symbols in 3.46</title>
+    <xi:include href="xml/api-index-3.46.xml"><xi:fallback /></xi:include>
+  </index>
+  <index id="api-index-3-44" role="3.44">
+    <title>Index of new symbols in 3.44</title>
+    <xi:include href="xml/api-index-3.44.xml"><xi:fallback /></xi:include>
   </index>
   <index id="api-index-3-42" role="3.42">
     <title>Index of new symbols in 3.42</title>

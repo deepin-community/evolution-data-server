@@ -18,12 +18,14 @@
 
 #include <glib/gi18n-lib.h>
 
+#include "e-data-server-util.h"
 #include "e-oauth2-service.h"
 #include "e-oauth2-service-base.h"
 
 #include "e-oauth2-service-google.h"
 
 /* https://developers.google.com/identity/protocols/OAuth2InstalledApp */
+/* https://developers.google.com/identity/protocols/oauth2/native-app */
 
 /* Forward Declarations */
 static void e_oauth2_service_google_oauth2_service_init (EOAuth2ServiceInterface *iface);
@@ -92,6 +94,7 @@ static const gchar *
 eos_google_get_client_id (EOAuth2Service *service,
 			  ESource *source)
 {
+	static gchar glob_buff[128] = {0, };
 	const gchar *client_id;
 
 	client_id = eos_google_read_settings (service, "oauth2-google-client-id");
@@ -99,13 +102,14 @@ eos_google_get_client_id (EOAuth2Service *service,
 	if (client_id && *client_id)
 		return client_id;
 
-	return GOOGLE_CLIENT_ID;
+	return e_oauth2_service_util_compile_value (GOOGLE_CLIENT_ID, glob_buff, sizeof (glob_buff));
 }
 
 static const gchar *
 eos_google_get_client_secret (EOAuth2Service *service,
 			      ESource *source)
 {
+	static gchar glob_buff[128] = {0, };
 	const gchar *client_secret;
 
 	client_secret = eos_google_read_settings (service, "oauth2-google-client-secret");
@@ -113,21 +117,67 @@ eos_google_get_client_secret (EOAuth2Service *service,
 	if (client_secret && *client_secret)
 		return client_secret;
 
-	return GOOGLE_CLIENT_SECRET;
+	return e_oauth2_service_util_compile_value (GOOGLE_CLIENT_SECRET, glob_buff, sizeof (glob_buff));
 }
 
 static const gchar *
 eos_google_get_authentication_uri (EOAuth2Service *service,
 				   ESource *source)
 {
-	return "https://accounts.google.com/o/oauth2/auth";
+	return "https://accounts.google.com/o/oauth2/v2/auth";
 }
 
 static const gchar *
 eos_google_get_refresh_uri (EOAuth2Service *service,
 			    ESource *source)
 {
-	return "https://www.googleapis.com/oauth2/v3/token";
+	return "https://oauth2.googleapis.com/token";
+}
+
+static const gchar *
+eos_google_get_redirect_uri (EOAuth2Service *service,
+			     ESource *source)
+{
+	G_LOCK_DEFINE_STATIC (redirect_uri);
+	const gchar *key_name = "oauth2-google-redirect-uri";
+	gchar *value;
+
+	G_LOCK (redirect_uri);
+
+	value = g_object_get_data (G_OBJECT (service), key_name);
+	if (!value) {
+		const gchar *client_id = eos_google_get_client_id (service, source);
+
+		if (client_id) {
+			GPtrArray *array;
+			gchar **strv;
+			gchar *joinstr;
+			guint ii;
+
+			strv = g_strsplit (client_id, ".", -1);
+			array = g_ptr_array_new ();
+
+			for (ii = 0; strv[ii]; ii++) {
+				g_ptr_array_insert (array, 0, strv[ii]);
+			}
+
+			g_ptr_array_add (array, NULL);
+
+			joinstr = g_strjoinv (".", (gchar **) array->pdata);
+			/* Use reverse-DNS of the client ID with the below path */
+			value = g_strconcat (joinstr, ":/oauth2redirect", NULL);
+
+			g_ptr_array_free (array, TRUE);
+			g_strfreev (strv);
+			g_free (joinstr);
+
+			g_object_set_data_full (G_OBJECT (service), key_name, value, g_free);
+		}
+	}
+
+	G_UNLOCK (redirect_uri);
+
+	return value;
 }
 
 static void
@@ -161,6 +211,9 @@ eos_google_extract_authorization_code (EOAuth2Service *service,
 				       const gchar *page_content,
 				       gchar **out_authorization_code)
 {
+	gchar *error_code = NULL, *error_message = NULL;
+	gboolean success;
+
 	g_return_val_if_fail (out_authorization_code != NULL, FALSE);
 
 	*out_authorization_code = NULL;
@@ -176,41 +229,13 @@ eos_google_extract_authorization_code (EOAuth2Service *service,
 		}
 	}
 
-	if (page_uri && *page_uri) {
-		SoupURI *suri;
+	/* It is an acceptable response when either the authorization code or the error information is set. */
+	success = e_oauth2_service_util_extract_from_uri (page_uri, out_authorization_code, &error_code, &error_message);
 
-		suri = soup_uri_new (page_uri);
-		if (suri) {
-			const gchar *query = soup_uri_get_query (suri);
-			gboolean known = FALSE;
+	g_free (error_code);
+	g_free (error_message);
 
-			if (query && *query) {
-				GHashTable *params;
-
-				params = soup_form_decode (query);
-				if (params) {
-					const gchar *response;
-
-					response = g_hash_table_lookup (params, "response");
-					if (response && g_ascii_strncasecmp (response, "code=", 5) == 0) {
-						*out_authorization_code = g_strdup (response + 5);
-						known = TRUE;
-					} else if (response && g_ascii_strncasecmp (response, "error", 5) == 0) {
-						known = TRUE;
-					}
-
-					g_hash_table_destroy (params);
-				}
-			}
-
-			soup_uri_free (suri);
-
-			if (known)
-				return TRUE;
-		}
-	}
-
-	return FALSE;
+	return success;
 }
 
 static void
@@ -223,6 +248,7 @@ e_oauth2_service_google_oauth2_service_init (EOAuth2ServiceInterface *iface)
 	iface->get_client_secret = eos_google_get_client_secret;
 	iface->get_authentication_uri = eos_google_get_authentication_uri;
 	iface->get_refresh_uri = eos_google_get_refresh_uri;
+	iface->get_redirect_uri = eos_google_get_redirect_uri;
 	iface->prepare_authentication_uri_query = eos_google_prepare_authentication_uri_query;
 	iface->extract_authorization_code = eos_google_extract_authorization_code;
 }

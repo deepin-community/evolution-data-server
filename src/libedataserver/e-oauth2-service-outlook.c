@@ -18,6 +18,7 @@
 
 #include <glib/gi18n-lib.h>
 
+#include "e-data-server-util.h"
 #include "e-oauth2-service.h"
 #include "e-oauth2-service-base.h"
 
@@ -154,52 +155,6 @@ eos_outlook_prepare_authentication_uri_query (EOAuth2Service *service,
 	e_oauth2_service_util_set_to_form (uri_query, "scope", OUTLOOK_SCOPE);
 }
 
-static gboolean
-eos_outlook_extract_authorization_code (EOAuth2Service *service,
-					ESource *source,
-					const gchar *page_title,
-					const gchar *page_uri,
-					const gchar *page_content,
-					gchar **out_authorization_code)
-{
-	SoupURI *suri;
-	gboolean known = FALSE;
-
-	g_return_val_if_fail (out_authorization_code != NULL, FALSE);
-
-	*out_authorization_code = NULL;
-
-	if (!page_uri || !*page_uri)
-		return FALSE;
-
-	suri = soup_uri_new (page_uri);
-	if (!suri)
-		return FALSE;
-
-	if (suri->query) {
-		GHashTable *uri_query = soup_form_decode (suri->query);
-
-		if (uri_query) {
-			const gchar *code;
-
-			code = g_hash_table_lookup (uri_query, "code");
-
-			if (code && *code) {
-				*out_authorization_code = g_strdup (code);
-				known = TRUE;
-			} else if (g_hash_table_lookup (uri_query, "error")) {
-				known = TRUE;
-			}
-
-			g_hash_table_unref (uri_query);
-		}
-	}
-
-	soup_uri_free (suri);
-
-	return known;
-}
-
 static void
 eos_outlook_prepare_refresh_token_form (EOAuth2Service *service,
 					ESource *source,
@@ -224,7 +179,6 @@ e_oauth2_service_outlook_oauth2_service_init (EOAuth2ServiceInterface *iface)
 	iface->get_refresh_uri = eos_outlook_get_refresh_uri;
 	iface->get_redirect_uri = eos_outlook_get_redirect_uri;
 	iface->prepare_authentication_uri_query = eos_outlook_prepare_authentication_uri_query;
-	iface->extract_authorization_code = eos_outlook_extract_authorization_code;
 	iface->prepare_refresh_token_form = eos_outlook_prepare_refresh_token_form;
 }
 

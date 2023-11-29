@@ -1,6 +1,5 @@
 # List of source files containing translatable strings.
 # Please keep this list in alphabetic order.
-[encoding: UTF-8]
 src/addressbook/backends/carddav/e-book-backend-carddav.c
 src/addressbook/backends/file/e-book-backend-file.c
 src/addressbook/backends/file/e-book-backend-file-migrate-bdb.c
@@ -194,6 +193,7 @@ src/libebackend/e-subprocess-factory.c
 src/libebackend/e-user-prompter-server.c
 src/libedataserver/e-categories.c
 src/libedataserver/e-client.c
+src/libedataserver/e-gdata-session.c
 src/libedataserver/e-oauth2-service.c
 src/libedataserver/e-oauth2-service-google.c
 src/libedataserver/e-oauth2-service-outlook.c
@@ -210,6 +210,7 @@ src/libedataserver/e-time-utils.c
 src/libedataserver/e-webdav-discover.c
 src/libedataserver/e-webdav-session.c
 src/libedataserverui/e-buffer-tagger.c
+src/libedataserverui/e-certificate-widget.c
 src/libedataserverui/e-credentials-prompter.c
 src/libedataserverui/e-credentials-prompter-impl-oauth2.c
 src/libedataserverui/e-credentials-prompter-impl-password.c
@@ -226,26 +227,28 @@ src/modules/yahoo-backend/module-yahoo-backend.c
 src/services/evolution-addressbook-factory/evolution-addressbook-factory.c
 src/services/evolution-alarm-notify/e-alarm-notify.c
 src/services/evolution-calendar-factory/evolution-calendar-factory.c
-[type: gettext/ini]src/services/evolution-source-registry/builtin/birthdays.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/caldav-stub.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/carddav-stub.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/contacts-stub.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/google-stub.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/ldap-stub.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/local.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/local-stub.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/sendmail.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/system-address-book.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/system-calendar.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/system-memo-list.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/system-proxy.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/system-task-list.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/vfolder.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/weather-stub.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/webcal-stub.source.in
-[type: gettext/ini]src/services/evolution-source-registry/builtin/webdav-notes-stub.source.in
 src/services/evolution-source-registry/evolution-source-registry.c
 src/services/evolution-user-prompter/evolution-user-prompter.c
 src/services/evolution-user-prompter/prompt-user-gtk.c
 src/tools/addressbook-export/addressbook-export.c
 src/tools/list-sources/list-sources.c
+
+# special-case .source files, pretending they are .desktop, to be understood by the gettext
+src/services/evolution-source-registry/builtin/birthdays.source.desktop.in
+src/services/evolution-source-registry/builtin/caldav-stub.source.desktop.in
+src/services/evolution-source-registry/builtin/carddav-stub.source.desktop.in
+src/services/evolution-source-registry/builtin/contacts-stub.source.desktop.in
+src/services/evolution-source-registry/builtin/google-stub.source.desktop.in
+src/services/evolution-source-registry/builtin/ldap-stub.source.desktop.in
+src/services/evolution-source-registry/builtin/local.source.desktop.in
+src/services/evolution-source-registry/builtin/local-stub.source.desktop.in
+src/services/evolution-source-registry/builtin/sendmail.source.desktop.in
+src/services/evolution-source-registry/builtin/system-address-book.source.desktop.in
+src/services/evolution-source-registry/builtin/system-calendar.source.desktop.in
+src/services/evolution-source-registry/builtin/system-memo-list.source.desktop.in
+src/services/evolution-source-registry/builtin/system-proxy.source.desktop.in
+src/services/evolution-source-registry/builtin/system-task-list.source.desktop.in
+src/services/evolution-source-registry/builtin/vfolder.source.desktop.in
+src/services/evolution-source-registry/builtin/weather-stub.source.desktop.in
+src/services/evolution-source-registry/builtin/webcal-stub.source.desktop.in
+src/services/evolution-source-registry/builtin/webdav-notes-stub.source.desktop.in

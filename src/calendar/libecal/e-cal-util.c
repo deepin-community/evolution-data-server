@@ -392,14 +392,16 @@ struct alarm_occurrence_data {
 	time_t start;
 	time_t end;
 	ECalComponentAlarmAction *omit;
+	gboolean only_check;
+	gboolean any_exists;
 
 	/* This is what we compute */
 	GSList *triggers; /* ECalComponentAlarmInstance * */
-	gint n_triggers;
 };
 
 static void
 add_trigger (struct alarm_occurrence_data *aod,
+	     ECalComponent *instance_comp,
              const gchar *auid,
 	     const gchar *rid,
              time_t instance_time,
@@ -408,13 +410,19 @@ add_trigger (struct alarm_occurrence_data *aod,
 {
 	ECalComponentAlarmInstance *instance;
 
+	aod->any_exists = TRUE;
+
+	if (aod->only_check)
+		return;
+
 	instance = e_cal_component_alarm_instance_new (auid, instance_time, occur_start, occur_end);
 
 	if (rid && *rid)
 		e_cal_component_alarm_instance_set_rid (instance, rid);
 
+	e_cal_component_alarm_instance_set_component (instance, instance_comp);
+
 	aod->triggers = g_slist_prepend (aod->triggers, instance);
-	aod->n_triggers++;
 }
 
 /* Callback used from cal_recur_generate_instances(); generates triggers for all
@@ -428,12 +436,19 @@ add_alarm_occurrences_cb (ICalComponent *icalcomp,
 			  GCancellable *cancellable,
 			  GError **error)
 {
-	struct alarm_occurrence_data *aod;
+	struct alarm_occurrence_data *aod = user_data;
+	ECalComponent *comp;
 	time_t start, end;
 	GSList *link;
 	gchar *rid;
 
-	aod = user_data;
+	if (aod->comp)
+		comp = g_object_ref (aod->comp);
+	else
+		comp = e_cal_component_new_from_icalcomponent (i_cal_component_clone (icalcomp));
+
+	g_return_val_if_fail (comp != NULL, FALSE);
+
 	start = i_cal_time_as_timet_with_zone (instance_start, i_cal_time_get_timezone (instance_start));
 	end = i_cal_time_as_timet_with_zone (instance_end, i_cal_time_get_timezone (instance_end));
 	rid = e_cal_util_component_get_recurid_as_string (icalcomp);
@@ -443,7 +458,7 @@ add_alarm_occurrences_cb (ICalComponent *icalcomp,
 		rid = i_cal_time_as_ical_string (instance_start);
 	}
 
-	for (link = aod->alarm_uids; link; link = g_slist_next (link)) {
+	for (link = aod->alarm_uids; link && (!aod->only_check || !aod->any_exists); link = g_slist_next (link)) {
 		const gchar *auid;
 		ECalComponentAlarm *alarm;
 		ECalComponentAlarmAction action;
@@ -455,8 +470,9 @@ add_alarm_occurrences_cb (ICalComponent *icalcomp,
 		gint i;
 
 		auid = link->data;
-		alarm = e_cal_component_get_alarm (aod->comp, auid);
-		g_return_val_if_fail (alarm != NULL, FALSE);
+		alarm = e_cal_component_get_alarm (comp, auid);
+		if (!alarm)
+			continue;
 
 		action = e_cal_component_alarm_get_action (alarm);
 		trigger = e_cal_component_alarm_get_trigger (alarm);
@@ -514,21 +530,22 @@ add_alarm_occurrences_cb (ICalComponent *icalcomp,
 				t = trigger_time + (ii + 1) * repeat_time;
 
 				if (t >= aod->start && t < aod->end)
-					add_trigger (aod, auid, rid, t, start, end);
+					add_trigger (aod, comp, auid, rid, t, start, end);
 			}
 		}
 
 		/* Add the trigger itself */
 
 		if (trigger_time >= aod->start && trigger_time < aod->end)
-			add_trigger (aod, auid, rid, trigger_time, start, end);
+			add_trigger (aod, comp, auid, rid, trigger_time, start, end);
 
 		e_cal_component_alarm_free (alarm);
 	}
 
+	g_clear_object (&comp);
 	g_free (rid);
 
-	return TRUE;
+	return !aod->only_check || !aod->any_exists;
 }
 
 /* Generates the absolute triggers for a component */
@@ -592,7 +609,7 @@ generate_absolute_triggers (ECalComponent *comp,
 			occur_end = -1;
 	}
 
-	for (link = aod->alarm_uids; link; link = g_slist_next (link)) {
+	for (link = aod->alarm_uids; link && (!aod->only_check || !aod->any_exists); link = g_slist_next (link)) {
 		const gchar *auid;
 		ECalComponentAlarm *alarm;
 		ECalComponentAlarmAction action;
@@ -604,7 +621,8 @@ generate_absolute_triggers (ECalComponent *comp,
 
 		auid = link->data;
 		alarm = e_cal_component_get_alarm (comp, auid);
-		g_return_if_fail (alarm != NULL);
+		if (!alarm)
+			continue;
 
 		action = e_cal_component_alarm_get_action (alarm);
 		trigger = e_cal_component_alarm_get_trigger (alarm);
@@ -646,14 +664,14 @@ generate_absolute_triggers (ECalComponent *comp,
 				tt = abs_time + (ii + 1) * repeat_time;
 
 				if (tt >= aod->start && tt < aod->end)
-					add_trigger (aod, auid, rid, tt, occur_start, occur_end);
+					add_trigger (aod, comp, auid, rid, tt, occur_start, occur_end);
 			}
 		}
 
 		/* Add the trigger itself */
 
 		if (abs_time >= aod->start && abs_time < aod->end)
-			add_trigger (aod, auid, rid, abs_time, occur_start, occur_end);
+			add_trigger (aod, comp, auid, rid, abs_time, occur_start, occur_end);
 
 		e_cal_component_alarm_free (alarm);
 	}
@@ -685,6 +703,73 @@ compare_alarm_instance (gconstpointer a,
 		return 0;
 }
 
+static void
+ecu_generate_alarms_for_comp (ECalComponent *comp,
+			      time_t start,
+			      time_t end,
+			      ECalComponentAlarmAction *omit,
+			      ECalRecurResolveTimezoneCb resolve_tzid,
+			      gpointer user_data,
+			      ICalTimezone *default_timezone,
+			      gboolean *out_any_exists,
+			      ECalComponentAlarms **out_alarms)
+{
+	GSList *alarm_uids;
+	time_t alarm_start, alarm_end;
+	struct alarm_occurrence_data aod;
+	ICalTime *alarm_start_tt, *alarm_end_tt;
+
+	if (out_any_exists)
+		*out_any_exists = FALSE;
+
+	if (out_alarms)
+		*out_alarms = NULL;
+
+	if (!e_cal_component_has_alarms (comp))
+		return;
+
+	alarm_uids = e_cal_component_get_alarm_uids (comp);
+	compute_alarm_range (comp, alarm_uids, start, end, &alarm_start, &alarm_end);
+
+	aod.comp = comp;
+	aod.alarm_uids = alarm_uids;
+	aod.start = start;
+	aod.end = end;
+	aod.omit = omit;
+	aod.only_check = !out_alarms;
+	aod.any_exists = FALSE;
+	aod.triggers = NULL;
+
+	alarm_start_tt = i_cal_time_new_from_timet_with_zone (alarm_start, FALSE, i_cal_timezone_get_utc_timezone ());
+	alarm_end_tt = i_cal_time_new_from_timet_with_zone (alarm_end, FALSE, i_cal_timezone_get_utc_timezone ());
+
+	e_cal_recur_generate_instances_sync (e_cal_component_get_icalcomponent (comp),
+		alarm_start_tt, alarm_end_tt,
+		add_alarm_occurrences_cb, &aod,
+		resolve_tzid, user_data,
+		default_timezone, NULL, NULL);
+
+	g_clear_object (&alarm_start_tt);
+	g_clear_object (&alarm_end_tt);
+
+	if (!aod.only_check || !aod.any_exists) {
+		/* We add the ABSOLUTE triggers separately */
+		generate_absolute_triggers (comp, &aod, resolve_tzid, user_data, default_timezone);
+	}
+
+	g_slist_free_full (alarm_uids, g_free);
+
+	if (out_any_exists)
+		*out_any_exists = aod.any_exists;
+
+	if (out_alarms && aod.triggers) {
+		*out_alarms = e_cal_component_alarms_new (comp);
+		e_cal_component_alarms_take_instances (*out_alarms, g_slist_sort (aod.triggers, compare_alarm_instance));
+	} else {
+		g_warn_if_fail (aod.triggers == NULL);
+	}
+}
+
 /**
  * e_cal_util_generate_alarms_for_comp:
  * @comp: The #ECalComponent to generate alarms from
@@ -702,6 +787,8 @@ compare_alarm_instance (gconstpointer a,
  * range. Free the returned structure with e_cal_component_alarms_free(),
  * when no longer needed.
  *
+ * See e_cal_util_generate_alarms_for_uid_sync()
+ *
  * Returns: (transfer full) (nullable): a list of all the alarms found
  *    for the given component in the given time range.
  */
@@ -714,52 +801,43 @@ e_cal_util_generate_alarms_for_comp (ECalComponent *comp,
                                      gpointer user_data,
                                      ICalTimezone *default_timezone)
 {
-	GSList *alarm_uids;
-	time_t alarm_start, alarm_end;
-	struct alarm_occurrence_data aod;
-	ICalTime *alarm_start_tt, *alarm_end_tt;
-	ECalComponentAlarms *alarms;
+	ECalComponentAlarms *alarms = NULL;
 
-	if (!e_cal_component_has_alarms (comp))
-		return NULL;
-
-	alarm_uids = e_cal_component_get_alarm_uids (comp);
-	compute_alarm_range (comp, alarm_uids, start, end, &alarm_start, &alarm_end);
-
-	aod.comp = comp;
-	aod.alarm_uids = alarm_uids;
-	aod.start = start;
-	aod.end = end;
-	aod.omit = omit;
-	aod.triggers = NULL;
-	aod.n_triggers = 0;
-
-	alarm_start_tt = i_cal_time_new_from_timet_with_zone (alarm_start, FALSE, i_cal_timezone_get_utc_timezone ());
-	alarm_end_tt = i_cal_time_new_from_timet_with_zone (alarm_end, FALSE, i_cal_timezone_get_utc_timezone ());
-
-	e_cal_recur_generate_instances_sync (e_cal_component_get_icalcomponent (comp),
-		alarm_start_tt, alarm_end_tt,
-		add_alarm_occurrences_cb, &aod,
-		resolve_tzid, user_data,
-		default_timezone, NULL, NULL);
-
-	g_clear_object (&alarm_start_tt);
-	g_clear_object (&alarm_end_tt);
-
-	/* We add the ABSOLUTE triggers separately */
-	generate_absolute_triggers (comp, &aod, resolve_tzid, user_data, default_timezone);
-
-	g_slist_free_full (alarm_uids, g_free);
-
-	if (aod.n_triggers == 0)
-		return NULL;
-
-	/* Create the component alarm instances structure */
-
-	alarms = e_cal_component_alarms_new (comp);
-	e_cal_component_alarms_take_instances (alarms, g_slist_sort (aod.triggers, compare_alarm_instance));
+	ecu_generate_alarms_for_comp (comp, start, end, omit, resolve_tzid, user_data, default_timezone, NULL, &alarms);
 
 	return alarms;
+}
+
+/**
+ * e_cal_util_has_alarms_in_range:
+ * @comp: an #ECalComponent to check alarms for
+ * @start: start time
+ * @end: end time
+ * @omit: alarm types to omit
+ * @resolve_tzid: (closure user_data) (scope call): Callback for resolving timezones
+ * @user_data: (closure): Data to be passed to the resolve_tzid callback
+ * @default_timezone: The timezone used to resolve DATE and floating DATE-TIME values.
+ *
+ * Checks whether the @comp has any alarms in the given time interval.
+ *
+ * Returns: %TRUE, when the #comp has any alarms in the given time interval
+ *
+ * Since: 3.48
+ **/
+gboolean
+e_cal_util_has_alarms_in_range (ECalComponent *comp,
+				time_t start,
+				time_t end,
+				ECalComponentAlarmAction *omit,
+				ECalRecurResolveTimezoneCb resolve_tzid,
+				gpointer user_data,
+				ICalTimezone *default_timezone)
+{
+	gboolean any_exists = FALSE;
+
+	ecu_generate_alarms_for_comp (comp, start, end, omit, resolve_tzid, user_data, default_timezone, &any_exists, NULL);
+
+	return any_exists;
 }
 
 /**
@@ -780,6 +858,8 @@ e_cal_util_generate_alarms_for_comp (ECalComponent *comp,
  * instances for them; putting them in the @comp_alarms list. Free the @comp_alarms
  * with g_slist_free_full (comp_alarms, e_cal_component_alarms_free);, when
  * no longer neeed.
+ *
+ * See e_cal_util_generate_alarms_for_uid_sync()
  *
  * Returns: the number of elements it added to the list
  */
@@ -814,6 +894,114 @@ e_cal_util_generate_alarms_for_list (GList *comps,
 	}
 
 	return n;
+}
+
+/**
+ * e_cal_util_generate_alarms_for_uid_sync:
+ * @client: an #ECalClient
+ * @uid: a component UID to generate alarms for
+ * @start: start time
+ * @end: end time
+ * @omit: alarm types to omit
+ * @resolve_tzid: (closure user_data) (scope call): Callback for resolving timezones
+ * @user_data: (closure): Data to be passed to the resolve_tzid callback
+ * @default_timezone: The timezone used to resolve DATE and floating DATE-TIME values
+ *
+ * Generates alarm instances for a calendar component with UID @uid,
+ * which is stored within the @client. In contrast to e_cal_util_generate_alarms_for_comp(),
+ * this function handles detached instances of recurring events properly.
+ *
+ * Returns the instances structure, or %NULL if no alarm instances occurred in the specified
+ * time range. Free the returned structure with e_cal_component_alarms_free(),
+ * when no longer needed.
+ *
+ * Returns: (transfer full) (nullable): a list of all the alarms found
+ *    for the given component in the given time range.
+ *
+ * Since: 3.48
+ **/
+ECalComponentAlarms *
+e_cal_util_generate_alarms_for_uid_sync (ECalClient *client,
+					 const gchar *uid,
+					 time_t start,
+					 time_t end,
+					 ECalComponentAlarmAction *omit,
+					 ECalRecurResolveTimezoneCb resolve_tzid,
+					 gpointer user_data,
+					 ICalTimezone *default_timezone,
+					 GCancellable *cancellable,
+					 GError **error)
+{
+	GHashTable *alarm_uids_hash;
+	GSList *alarm_uids = NULL;
+	GSList *objects = NULL, *link;
+	time_t alarm_start = start, alarm_end = end;
+	struct alarm_occurrence_data aod;
+	ECalComponentAlarms *alarms;
+
+	g_return_val_if_fail (E_IS_CAL_CLIENT (client), NULL);
+	g_return_val_if_fail (uid != NULL, NULL);
+
+	if (!e_cal_client_get_objects_for_uid_sync (client, uid, &objects, cancellable, error))
+		return NULL;
+
+	alarm_uids_hash = g_hash_table_new (g_str_hash, g_str_equal);
+
+	for (link = objects; link; link = g_slist_next (link)) {
+		ECalComponent *comp = link->data;
+		GSList *auids = e_cal_component_get_alarm_uids (comp);
+
+		if (auids) {
+			GSList *alink;
+
+			compute_alarm_range (comp, auids, alarm_start, alarm_end, &alarm_start, &alarm_end);
+
+			for (alink = auids; alink; alink = g_slist_next (alink)) {
+				const gchar *auid = alink->data;
+				if (auid && !g_hash_table_contains (alarm_uids_hash, auid)) {
+					alarm_uids = g_slist_prepend (alarm_uids, (gpointer) auid);
+					g_hash_table_add (alarm_uids_hash, (gpointer) auid);
+					alink->data = NULL;
+				}
+			}
+
+			g_slist_free_full (auids, g_free);
+		}
+	}
+
+	g_clear_pointer (&alarm_uids_hash, g_hash_table_destroy);
+
+	aod.comp = NULL;
+	aod.alarm_uids = alarm_uids;
+	aod.start = start;
+	aod.end = end;
+	aod.omit = omit;
+	aod.only_check = FALSE;
+	aod.any_exists = FALSE;
+	aod.triggers = NULL;
+
+	e_cal_client_generate_instances_for_uid_sync (client, uid, alarm_start, alarm_end,
+		cancellable, add_alarm_occurrences_cb, &aod);
+
+	for (link = objects; link; link = g_slist_next (link)) {
+		ECalComponent *comp = link->data;
+
+		/* We add the ABSOLUTE triggers separately */
+		generate_absolute_triggers (comp, &aod, resolve_tzid, user_data, default_timezone);
+	}
+
+	g_slist_free_full (objects, g_object_unref);
+	g_slist_free_full (alarm_uids, g_free);
+
+	if (!aod.triggers)
+		return NULL;
+
+	/* Create the component alarm instances structure */
+
+	alarms = e_cal_component_alarms_new (NULL);
+	e_cal_component_alarms_take_instances (alarms, g_slist_sort (aod.triggers, compare_alarm_instance));
+
+	return alarms;
 }
 
 /**
@@ -1945,7 +2133,8 @@ e_cal_util_is_first_instance (ECalComponent *comp,
  *
  * Fetches system timezone localtion string.
  *
- * Returns: (transfer full): system timezone location string, %NULL on an error.
+ * Returns: (transfer full) (nullable): system timezone location string, %NULL
+ * on an error.
  *
  * Since: 2.28
  **/
@@ -2089,7 +2278,7 @@ e_cal_util_get_component_occur_times (ECalComponent *comp,
 			*out_end = max_time;
 
 	} else {
-		/* ALARMS, EVENTS: DTEND and reccurences */
+		/* ALARMS, EVENTS: DTEND and recurrences */
 
 		time_t may_end = _TIME_MIN;
 
@@ -3100,8 +3289,15 @@ e_cal_util_clamp_vtimezone (ICalComponent *vtimezone,
 	g_return_if_fail (I_CAL_IS_COMPONENT (vtimezone));
 	g_return_if_fail (i_cal_component_isa (vtimezone) == I_CAL_VTIMEZONE_COMPONENT);
 	g_return_if_fail (I_CAL_IS_TIME ((ICalTime *) from));
-	if (to)
+	if (to) {
 		g_return_if_fail (I_CAL_IS_TIME ((ICalTime *) to));
+
+		if (i_cal_time_is_null_time (to) || !i_cal_time_is_valid_time (to))
+			to = NULL;
+	}
+
+	if (i_cal_time_is_null_time (from) || !i_cal_time_is_valid_time (from))
+		return;
 
 	e_cal_util_clamp_vtimezone_subcomps (vtimezone, I_CAL_XSTANDARD_COMPONENT, from, to);
 	e_cal_util_clamp_vtimezone_subcomps (vtimezone, I_CAL_XDAYLIGHT_COMPONENT, from, to);
@@ -3138,7 +3334,14 @@ e_cal_util_clamp_vtimezone_by_component (ICalComponent *vtimezone,
 
 		recurid = i_cal_property_get_recurrenceid (prop);
 
-		dtend = i_cal_component_get_dtend (component);
+		dtend = i_cal_component_isa (component) == I_CAL_VEVENT_COMPONENT ? i_cal_component_get_dtend (component) : NULL;
+
+		if (dtend && (i_cal_time_is_null_time (dtend) || !i_cal_time_is_valid_time (dtend)))
+			g_clear_object (&dtend);
+
+		if (!dtend)
+			dtend = i_cal_component_get_due (component);
+
 		if (dtend && i_cal_time_compare (recurid, dtend) >= 0) {
 			g_clear_object (&dtend);
 			dtend = recurid;
@@ -3148,13 +3351,576 @@ e_cal_util_clamp_vtimezone_by_component (ICalComponent *vtimezone,
 		g_clear_object (&recurid);
 		g_object_unref (prop);
 	} else if (!e_cal_util_component_has_rrules (component)) {
-		dtend = i_cal_component_get_dtend (component);
+		dtend = i_cal_component_isa (component) == I_CAL_VEVENT_COMPONENT ? i_cal_component_get_dtend (component) : NULL;
+
+		if (dtend && (i_cal_time_is_null_time (dtend) || !i_cal_time_is_valid_time (dtend)))
+			g_clear_object (&dtend);
+
+		if (!dtend)
+			dtend = i_cal_component_get_due (component);
+
+		if (dtend && (i_cal_time_is_null_time (dtend) || !i_cal_time_is_valid_time (dtend)))
+			g_clear_object (&dtend);
+
 		if (!dtend)
 			dtend = g_object_ref (dtstart);
+	}
+
+	if (i_cal_time_is_null_time (dtstart) || !i_cal_time_is_valid_time (dtstart)) {
+		g_clear_object (&dtstart);
+
+		if (dtend && !i_cal_time_is_null_time (dtend) && i_cal_time_is_valid_time (dtend))
+			dtstart = g_object_ref (dtend);
 	}
 
 	e_cal_util_clamp_vtimezone (vtimezone, dtstart, dtend);
 
 	g_clear_object (&dtstart);
 	g_clear_object (&dtend);
+}
+
+static gboolean
+locale_equals_language (const gchar *locale,
+			const gchar *language)
+{
+	guint ii;
+
+	for (ii = 0; locale[ii] && language[ii]; ii++) {
+		if ((locale[ii] == '-' || locale[ii] == '_') &&
+		    (language[ii] == '-' || language[ii] == '_')) {
+			continue;
+		}
+
+		if (g_ascii_tolower (locale[ii]) != g_ascii_tolower (language[ii]))
+			break;
+	}
+
+	return !locale[ii] && !language[ii];
+}
+
+/**
+ * e_cal_util_component_find_property_for_locale:
+ * @icalcomp: an #ICalComponent
+ * @prop_kind: an #ICalPropertyKind to traverse
+ * @locale: (nullable): a locale identifier, or %NULL
+ *
+ * Searches properties of kind @prop_kind in the @icalcomp and returns
+ * one, which is usable for the @locale. When @locale is %NULL,
+ * the current locale is assumed. If no such property for the locale
+ * exists either the one with no language parameter or the first
+ * found is returned.
+ *
+ * Free the returned non-NULL #ICalProperty with g_object_unref(),
+ * when no longer needed.
+ *
+ * Returns: (transfer full) (nullable): a property of kind @prop_kind for the @locale,
+ *    %NULL if no such property is set on the @comp.
+ *
+ * Since: 3.46
+
+ **/
+ICalProperty *
+e_cal_util_component_find_property_for_locale (ICalComponent *icalcomp,
+					       ICalPropertyKind prop_kind,
+					       const gchar *locale)
+{
+	ICalProperty *prop;
+	ICalProperty *result = NULL;
+	ICalProperty *first = NULL;
+	ICalProperty *nolang = NULL;
+	ICalProperty *best = NULL;
+	gint best_index = -1;
+	gchar **locale_variants = NULL;
+	const gchar *const *locales = NULL;
+
+	g_return_val_if_fail (I_CAL_IS_COMPONENT (icalcomp), NULL);
+
+	if (locale) {
+		locale_variants = g_get_locale_variants (locale);
+		locales = (const gchar * const *) locale_variants;
+	}
+
+	if (!locales)
+		locales = g_get_language_names ();
+
+	for (prop = i_cal_component_get_first_property (icalcomp, prop_kind);
+	     prop;
+	     g_object_unref (prop), prop = i_cal_component_get_next_property (icalcomp, prop_kind)) {
+		ICalParameter *param;
+
+		param = i_cal_property_get_first_parameter (prop, I_CAL_LANGUAGE_PARAMETER);
+		if (param) {
+			const gchar *language = i_cal_parameter_get_language (param);
+
+			if (!language || !*language) {
+				if (!best) {
+					if (!first)
+						first = g_object_ref (prop);
+					if (!nolang)
+						nolang = g_object_ref (prop);
+				}
+			} else {
+				guint ii;
+
+				for (ii = 0; locales && locales[ii] && (best_index == -1 || ii < best_index); ii++) {
+					if (locale_equals_language (locales[ii], language)) {
+						g_clear_object (&best);
+						best = g_object_ref (prop);
+						best_index = ii;
+						break;
+					}
+				}
+
+				if (!ii && best) {
+					g_clear_object (&param);
+					g_clear_object (&prop);
+					break;
+				}
+
+				if (!best && !first)
+					first = g_object_ref (prop);
+			}
+
+			g_clear_object (&param);
+		} else if (!best) {
+			if (!first)
+				first = g_object_ref (prop);
+			if (!nolang)
+				nolang = g_object_ref (prop);
+		}
+	}
+
+	if (best)
+		result = g_steal_pointer (&best);
+	else if (nolang)
+		result = g_steal_pointer (&nolang);
+	else if (first)
+		result = g_steal_pointer (&first);
+
+	g_clear_object (&first);
+	g_clear_object (&nolang);
+	g_clear_object (&best);
+	g_clear_pointer (&locale_variants, g_strfreev);
+
+	return result;
+}
+
+/**
+ * e_cal_util_foreach_category:
+ * @comp: an #ICalComponent
+ * @func: (scope call): an #ECalUtilForeachCategoryFunc callback to call for each category
+ * @user_data: user data passed to the @func
+ *
+ * Calls @func for each category stored in the @comp.
+ *
+ * Since: 3.48
+ **/
+void
+e_cal_util_foreach_category (ICalComponent *comp,
+			     ECalUtilForeachCategoryFunc func,
+			     gpointer user_data)
+{
+	ICalProperty *prop;
+	const gchar *categories;
+	const gchar *p;
+	const gchar *cat_start;
+	gchar *str;
+	gboolean can_continue = TRUE;
+
+	g_return_if_fail (I_CAL_IS_COMPONENT (comp));
+	g_return_if_fail (func != NULL);
+
+	for (prop = i_cal_component_get_first_property (comp, I_CAL_CATEGORIES_PROPERTY);
+	     prop && can_continue;
+	     g_object_unref (prop), prop = i_cal_component_get_next_property (comp, I_CAL_CATEGORIES_PROPERTY)) {
+		categories = i_cal_property_get_categories (prop);
+
+		if (!categories)
+			continue;
+
+		cat_start = categories;
+
+		for (p = categories; *p && can_continue; p++) {
+			if (*p == ',') {
+				if (p - cat_start > 0) {
+					str = g_strstrip (g_strndup (cat_start, p - cat_start));
+					if (*str)
+						can_continue = func (comp, &str, user_data);
+					g_free (str);
+				}
+
+				cat_start = p + 1;
+			}
+		}
+
+		if (can_continue && p - cat_start > 0) {
+			str = g_strstrip (g_strndup (cat_start, p - cat_start));
+			if (*str)
+				can_continue = func (comp, &str, user_data);
+			g_free (str);
+		}
+	}
+
+	g_clear_object (&prop);
+}
+
+static gboolean
+e_cal_util_extract_categories_cb (ICalComponent *comp,
+				  gchar **inout_category,
+				  gpointer user_data)
+{
+	GHashTable **pcategories = user_data;
+
+	g_return_val_if_fail (pcategories != NULL, FALSE);
+	g_return_val_if_fail (inout_category != NULL, FALSE);
+	g_return_val_if_fail (*inout_category != NULL, FALSE);
+
+	if (!*pcategories)
+		*pcategories = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+
+	g_hash_table_insert (*pcategories, *inout_category, GINT_TO_POINTER (1));
+
+	*inout_category = NULL;
+
+	return TRUE;
+}
+
+static GHashTable *
+e_cal_util_extract_categories (ICalComponent *comp)
+{
+	GHashTable *categories = NULL;
+
+	if (!comp)
+		return NULL;
+
+	g_return_val_if_fail (I_CAL_IS_COMPONENT (comp), NULL);
+
+	e_cal_util_foreach_category (comp, e_cal_util_extract_categories_cb, &categories);
+
+	return categories;
+}
+
+static gboolean
+e_cal_util_remove_matching_category_cb (gpointer key,
+					gpointer value,
+					gpointer user_data)
+{
+	GHashTable *other_table = user_data;
+
+	/* Remove from both tables those common */
+	return g_hash_table_remove (other_table, key);
+}
+
+/**
+ * e_cal_util_diff_categories:
+ * @old_comp: (nullable): an old #ICalComponent, or %NULL
+ * @new_comp: (nullable): a new #ICalComponent, or %NULL
+ * @out_added: (out) (transfer container) (element-type utf8 int): a #GHashTable with added categories
+ * @out_removed: (out) (transfer container) (element-type utf8 int): a #GHashTable with removed categories
+ *
+ * Compares list of categories on the @old_comp with the list of categories
+ * on the @new_comp and fills @out_added categories and @out_removed categories
+ * accordingly, as if the @old_comp is replaced with the @new_comp. When either
+ * of the components is %NULL, it's considered as having no categories set.
+ * Rather than returning empty #GHashTable, the return argument is set to %NULL
+ * when there are no added/removed categories.
+ *
+ * The key of the hash table is the category string, the value is an integer (1).
+ * There is used the hash table only for speed.
+ *
+ * The returned #GHashTable-s should be freed with g_hash_table_unref(),
+ * when no longer needed.
+ *
+ * Since: 3.48
+ **/
+void
+e_cal_util_diff_categories (ICalComponent *old_comp,
+			    ICalComponent *new_comp,
+			    GHashTable **out_added, /* const gchar *category ~> 1 */
+			    GHashTable **out_removed) /* const gchar *category ~> 1 */
+{
+	if (old_comp)
+		g_return_if_fail (I_CAL_IS_COMPONENT (old_comp));
+	if (new_comp)
+		g_return_if_fail (I_CAL_IS_COMPONENT (new_comp));
+	g_return_if_fail (out_added != NULL);
+	g_return_if_fail (out_removed != NULL);
+
+	*out_added = e_cal_util_extract_categories (new_comp);
+	*out_removed = e_cal_util_extract_categories (old_comp);
+
+	if (*out_added && *out_removed) {
+		g_hash_table_foreach_remove (*out_added, e_cal_util_remove_matching_category_cb, *out_removed);
+
+		if (!g_hash_table_size (*out_added)) {
+			g_hash_table_unref (*out_added);
+			*out_added = NULL;
+		}
+
+		if (!g_hash_table_size (*out_removed)) {
+			g_hash_table_unref (*out_removed);
+			*out_removed = NULL;
+		}
+	}
+}
+
+/**
+ * e_cal_util_strip_mailto:
+ * @address: (nullable): an address with or without "mailto:" prefix
+ *
+ * Strips "mailto:" prefix from the @address, if present. The returned
+ * pointer is either the @address or a shifted position within the @address.
+ *
+ * Returns: the @address without the "mailto:" prefix
+ *
+ * Since: 3.50
+ **/
+const gchar *
+e_cal_util_strip_mailto (const gchar *address)
+{
+	if (!address)
+		return NULL;
+
+	if (!g_ascii_strncasecmp (address, "mailto:", 7))
+		address += 7;
+
+	return address;
+}
+
+/**
+ * e_cal_util_email_addresses_equal:
+ * @email1: (nullable): the first email
+ * @email2: (nullable): the second email
+ *
+ * Compares two email addresses and returns whether they are equal.
+ * Each address can contain a "mailto:" prefix. The two addresses
+ * match only if they are non-NULL and non-empty. The address itself
+ * is compared case insensitively.
+ *
+ * Returns: %TRUE, when the @email1 equals to @email2
+ *
+ * Since: 3.50
+ **/
+gboolean
+e_cal_util_email_addresses_equal (const gchar *email1,
+				  const gchar *email2)
+{
+	if (!email1 || !email2)
+		return FALSE;
+
+	email1 = e_cal_util_strip_mailto (email1);
+	email2 = e_cal_util_strip_mailto (email2);
+
+	if (!email1 || !*email1 || !email2 || !*email2)
+		return FALSE;
+
+	return g_ascii_strcasecmp (email1, email2) == 0;
+}
+
+/**
+ * e_cal_util_get_default_name_and_address:
+ * @registry: an #ESourceRegistry
+ * @out_name: (out callee-allocates) (optional): return location for the user's real name, or %NULL
+ * @out_address: (out callee-allocates) (optional): return location for the user's email address, or %NULL
+ *
+ * Returns the real name and email address of the default mail identity,
+ * if available.  If no default mail identity is available, @out_name and
+ * @out_address are set to %NULL and the function returns %FALSE.
+ *
+ * Returns: %TRUE if @out_name and/or @out_address were set
+ *
+ * Since: 3.50
+ **/
+gboolean
+e_cal_util_get_default_name_and_address (ESourceRegistry *registry,
+					 gchar **out_name,
+					 gchar **out_address)
+{
+	ESource *source;
+	ESourceExtension *extension;
+	const gchar *extension_name;
+	gboolean success;
+
+	g_return_val_if_fail (E_IS_SOURCE_REGISTRY (registry), FALSE);
+
+	source = e_source_registry_ref_default_mail_identity (registry);
+
+	if (source) {
+		extension_name = E_SOURCE_EXTENSION_MAIL_IDENTITY;
+		extension = e_source_get_extension (source, extension_name);
+
+		if (out_name)
+			*out_name = e_source_mail_identity_dup_name (E_SOURCE_MAIL_IDENTITY (extension));
+
+		if (out_address)
+			*out_address = e_source_mail_identity_dup_address (E_SOURCE_MAIL_IDENTITY (extension));
+
+		g_object_unref (source);
+
+		success = TRUE;
+	} else {
+		if (out_name)
+			*out_name = NULL;
+
+		if (out_address)
+			*out_address = NULL;
+
+		success = FALSE;
+	}
+
+	return success;
+}
+
+static const gchar *
+e_cal_util_get_property_value_email (const gchar *value,
+				     ECalComponentParameterBag *params)
+{
+	const gchar *address = NULL;
+
+	if (params) {
+		guint email_index;
+
+		#ifdef HAVE_I_CAL_EMAIL_PARAMETER
+		email_index = e_cal_component_parameter_bag_get_first_by_kind (params, I_CAL_EMAIL_PARAMETER);
+		#else
+		email_index = e_cal_component_parameter_bag_get_first_by_kind (params, (ICalParameterKind) ICAL_EMAIL_PARAMETER);
+		#endif
+
+		if (email_index < e_cal_component_parameter_bag_get_count (params)) {
+			ICalParameter *param;
+
+			param = e_cal_component_parameter_bag_get (params, email_index);
+
+			if (param) {
+				#ifdef HAVE_I_CAL_EMAIL_PARAMETER
+				address = i_cal_parameter_get_email (param);
+				#else
+				address = icalparameter_get_email (i_cal_object_get_native (I_CAL_OBJECT (param)));
+				#endif
+
+				if (address && !*address)
+					address = NULL;
+			}
+		}
+	}
+
+	if (!address)
+		address = value;
+
+	if (address)
+		address = e_cal_util_strip_mailto (address);
+
+	if (address && !*address)
+		address = NULL;
+
+	return address;
+}
+
+/**
+ * e_cal_util_get_organizer_email:
+ * @organizer: (nullable): an #ECalComponentOrganizer
+ *
+ * Returns an organizer email, without the "mailto:" prefix, if
+ * the @organizer has it set. The email can be read from an "EMAIL"
+ * parameter, if present.
+ *
+ * Returns: (nullable): email of the @organizer, or %NULL
+ *
+ * Since: 3.50
+ **/
+const gchar *
+e_cal_util_get_organizer_email (const ECalComponentOrganizer *organizer)
+{
+	if (!organizer)
+		return NULL;
+
+	return e_cal_util_get_property_value_email (
+		e_cal_component_organizer_get_value (organizer),
+		e_cal_component_organizer_get_parameter_bag (organizer));
+}
+
+/**
+ * e_cal_util_get_attendee_email:
+ * @attendee: (nullable): an ECalComponentAttendee
+ *
+ * Returns an attendee email, without the "mailto:" prefix, if
+ * the @attendee has it set. The email can be read from an "EMAIL"
+ * parameter, if present.
+ *
+ * Returns: (nullable): email of the @attendee, or %NULL
+ *
+ * Since: 3.50
+ **/
+const gchar *
+e_cal_util_get_attendee_email (const ECalComponentAttendee *attendee)
+{
+	if (!attendee)
+		return NULL;
+
+	return e_cal_util_get_property_value_email (
+		e_cal_component_attendee_get_value (attendee),
+		e_cal_component_attendee_get_parameter_bag (attendee));
+}
+
+/**
+ * e_cal_util_get_property_email:
+ * @prop: an #ICalProperty
+ *
+ * Returns an @prop email, without the "mailto:" prefix, if
+ * the @prop has it set. The email can be read from an "EMAIL"
+ * parameter, if present. Otherwise the @prop can be only of
+ * type %I_CAL_ORGANIZER_PROPERTY or %I_CAL_ATTENDEE_PROPERTY.
+ *
+ * See also: e_cal_util_get_organizer_email(), e_cal_util_get_attendee_email()
+ *
+ * Returns: (nullable): email of the @prop, or %NULL
+ *
+ * Since: 3.50
+ **/
+const gchar *
+e_cal_util_get_property_email (ICalProperty *prop)
+{
+	ICalParameter *param;
+	const gchar *email = NULL;
+
+	if (!prop)
+		return NULL;
+
+	#ifdef HAVE_I_CAL_EMAIL_PARAMETER
+	param = i_cal_property_get_first_parameter (prop, I_CAL_EMAIL_PARAMETER);
+
+	if (param) {
+		email = i_cal_parameter_get_email (param);
+		if (email)
+			email = e_cal_util_strip_mailto (email);
+
+		g_clear_object (&param);
+	}
+	#else
+	param = i_cal_property_get_first_parameter (prop, (ICalParameterKind) ICAL_EMAIL_PARAMETER);
+
+	if (param) {
+		email = icalparameter_get_email (i_cal_object_get_native (I_CAL_OBJECT (param)));
+		if (email)
+			email = e_cal_util_strip_mailto (email);
+
+		g_clear_object (&param);
+	}
+	#endif /* HAVE_I_CAL_EMAIL_PARAMETER */
+
+	if (!email || !*email) {
+		if (i_cal_property_isa (prop) == I_CAL_ORGANIZER_PROPERTY)
+			email = i_cal_property_get_organizer (prop);
+		else if (i_cal_property_isa (prop) == I_CAL_ATTENDEE_PROPERTY)
+			email = i_cal_property_get_attendee (prop);
+		else
+			g_warn_if_reached ();
+
+		email = e_cal_util_strip_mailto (email);
+	}
+
+	if (email && !*email)
+		email = NULL;
+
+	return email;
 }
