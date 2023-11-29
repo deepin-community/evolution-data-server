@@ -148,9 +148,11 @@ struct _EBookCacheClass {
 	gchar *		(* dup_contact_revision)
 						(EBookCache *book_cache,
 						 EContact *contact);
+	void		(* categories_changed)	(EBookCache *book_cache,
+						 const gchar *categories);
 
 	/* Padding for future expansion */
-	gpointer reserved[10];
+	gpointer reserved[9];
 };
 
 /**
@@ -218,6 +220,7 @@ gboolean	e_book_cache_set_locale		(EBookCache *book_cache,
 gchar *		e_book_cache_dup_locale		(EBookCache *book_cache);
 
 ECollator *	e_book_cache_ref_collator	(EBookCache *book_cache);
+gchar *		e_book_cache_dup_categories	(EBookCache *book_cache);
 
 /* Adding / Removing / Searching contacts */
 gboolean	e_book_cache_put_contact	(EBookCache *book_cache,
@@ -304,6 +307,10 @@ gboolean	e_book_cache_search_with_callback
 						 gpointer user_data,
 						 GCancellable *cancellable,
 						 GError **error);
+gboolean	e_book_cache_contains_email	(EBookCache *book_cache,
+						 const gchar *email_address,
+						 GCancellable *cancellable,
+						 GError **error);
 /* Cursor API */
 GType		e_book_cache_cursor_get_type	(void) G_GNUC_CONST;
 
@@ -343,6 +350,37 @@ gint		e_book_cache_cursor_compare_contact
 						 EBookCacheCursor *cursor,
 						 EContact *contact,
 						 gboolean *out_matches_sexp);
+gboolean	e_book_cache_count_query	(EBookCache *book_cache,
+						 const gchar *sexp,
+						 guint *out_n_total,
+						 GCancellable *cancellable,
+						 GError **error);
+gboolean	e_book_cache_dup_query_field	(EBookCache *book_cache,
+						 EContactField summary_field,
+						 const gchar *sexp,
+						 EContactField sort_field,
+						 EBookCursorSortType sort_type,
+						 guint n_offset,
+						 guint n_limit,
+						 GPtrArray **out_uids, /* gchar * */
+						 GPtrArray **out_values, /* gchar * */
+						 GCancellable *cancellable,
+						 GError **error);
+gboolean	e_book_cache_dup_query_contacts	(EBookCache *book_cache,
+						 const gchar *sexp,
+						 EContactField sort_field,
+						 EBookCursorSortType sort_type,
+						 guint n_offset,
+						 guint n_limit,
+						 GPtrArray **out_contacts, /* EContact * */
+						 GCancellable *cancellable,
+						 GError **error);
+gboolean	e_book_cache_dup_summary_field	(EBookCache *book_cache,
+						 EContactField summary_field,
+						 const gchar *uid,
+						 gchar **out_value,
+						 GCancellable *cancellable,
+						 GError **error);
 
 G_END_DECLS
 

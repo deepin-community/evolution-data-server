@@ -10,7 +10,18 @@ set(SOURCES
 	e-book-backend-file.c
 	e-book-backend-file.h
 	e-book-backend-file-factory.c
+	e-book-sqlite-keys.c
+	e-book-sqlite-keys.h
 )
+
+if(ENABLE_MAINTAINER_MODE)
+	list(APPEND SOURCES
+		e-book-backend-dummy.c
+		e-book-backend-dummy.h
+		e-book-backend-dummy-meta.c
+		e-book-backend-dummy-meta.h
+	)
+endif(ENABLE_MAINTAINER_MODE)
 
 if(HAVE_LIBDB)
 	list(APPEND SOURCES

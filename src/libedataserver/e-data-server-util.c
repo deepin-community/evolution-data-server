@@ -21,6 +21,10 @@
 
 #include "evolution-data-server-config.h"
 
+#ifdef HAVE_MALLOC_TRIM
+#include <malloc.h>
+#endif
+
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -31,6 +35,7 @@
 #endif
 
 #include <glib-object.h>
+#include <libsoup/soup.h>
 
 #include "e-source.h"
 #include "e-source-address-book.h"
@@ -204,7 +209,7 @@ e_util_strdup_strip (const gchar *string)
 
 /**
  * e_util_strcmp0:
- * @str1: (nullable): a C string on %NULL
+ * @str1: (nullable): a C string or %NULL
  * @str2: (nullable): another C string or %NULL
  *
  * Compares @str1 and @str2 like g_strcmp0(), except it handles %NULL and
@@ -362,7 +367,6 @@ stripped_char (gunichar ch)
 	gunichar decomp[4];
 	gunichar retval;
 	GUnicodeType utype;
-	gsize dlen;
 
 	utype = g_unichar_type (ch);
 
@@ -378,7 +382,7 @@ stripped_char (gunichar ch)
 		ch = g_unichar_tolower (ch);
 		/* falls through */
 	case G_UNICODE_LOWERCASE_LETTER:
-		if ((dlen = g_unichar_fully_decompose (ch, FALSE, decomp, 4))) {
+		if (g_unichar_fully_decompose (ch, FALSE, decomp, 4)) {
 			retval = decomp[0];
 			return retval;
 		}
@@ -397,8 +401,8 @@ stripped_char (gunichar ch)
  * and @haystack are UTF-8 strings. Both strings are stripped and
  * decomposed for comparison, and case is ignored.
  *
- * Returns: A pointer to the first instance of @needle in @haystack, or
- *          %NULL if either of the strings are not legal UTF-8 strings.
+ * Returns: (nullable): A pointer to the first instance of @needle in @haystack,
+ *    or %NULL if either of the strings are not legal UTF-8 strings.
  **/
 const gchar *
 e_util_utf8_strstrcasedecomp (const gchar *haystack,
@@ -504,11 +508,11 @@ e_util_utf8_strcasecmp (const gchar *s1,
 
 /**
  * e_util_utf8_remove_accents:
- * @str: a UTF-8 string, or %NULL
+ * @str: (nullable): a UTF-8 string, or %NULL
  *
  * Returns a newly-allocated copy of @str with accents removed.
  *
- * Returns: a newly-allocated string
+ * Returns: (nullable): a newly-allocated string
  *
  * Since: 2.28
  **/
@@ -587,7 +591,7 @@ e_util_utf8_decompose (const gchar *text)
 
 /**
  * e_util_utf8_make_valid:
- * @str: a UTF-8 string
+ * @str: (nullable): a UTF-8 string
  *
  * Returns a newly-allocated copy of @str, with invalid characters
  * replaced by Unicode replacement characters (U+FFFD).
@@ -608,7 +612,7 @@ e_util_utf8_make_valid (const gchar *str)
 
 /**
  * e_util_utf8_data_make_valid:
- * @data: UTF-8 binary data
+ * @data: (nullable): UTF-8 binary data
  * @data_bytes: length of the binary data
  *
  * Returns a newly-allocated NULL-terminated string with invalid characters
@@ -698,7 +702,7 @@ e_util_utf8_normalize (const gchar *str)
 
 /**
  * e_util_ensure_gdbus_string:
- * @str: a possibly invalid UTF-8 string, or %NULL
+ * @str: (nullable): a possibly invalid UTF-8 string, or %NULL
  * @gdbus_str: return location for the corrected string
  *
  * If @str is a valid UTF-8 string, the function returns @str and does
@@ -953,7 +957,7 @@ e_filename_make_safe (gchar *string)
  * e_filename_mkdir_encoded:
  * @basepath: base path of a file name; this is left unchanged
  * @fileprefix: prefix for the filename; this is encoded
- * @filename: file name to use; this is encoded; can be %NULL
+ * @filename: (nullable): file name to use; this is encoded; can be %NULL
  * @fileindex: used when @filename is NULL, then the filename
  *        is generated as "file" + fileindex
  *
@@ -961,7 +965,7 @@ e_filename_make_safe (gchar *string)
  * and makes sure the path @basepath exists. If creation of
  * the path fails, then NULL is returned.
  *
- * Returns: Full local path like g_build_filename() except that @fileprefix
+ * Returns: (nullable): Full local path like g_build_filename() except that @fileprefix
  * and @filename are encoded to create a proper file elements for
  * a file system. Free returned pointer with g_free().
  *
@@ -1477,7 +1481,7 @@ e_binding_bind_property (gpointer source,
  *   from the @source to the @target, or %NULL to use the default
  * @transform_from: (scope notified) (nullable): the transformation function
  *   from the @target to the @source, or %NULL to use the default
- * @user_data: custom data to be passed to the transformation functions,
+ * @user_data: (nullable): custom data to be passed to the transformation functions,
  *   or %NULL
  * @notify: function to be called when disposing the binding, to free the
  *   resources used by the transformation functions
@@ -1872,7 +1876,8 @@ e_async_closure_free (EAsyncClosure *closure)
 
 /**
  * e_async_closure_callback: (skip)
- * @object: a #GObject or %NULL, it is not used by the function at all
+ * @object: (nullable): a #GObject or %NULL, it is not used by the function
+ *   at all
  * @result: a #GAsyncResult
  * @closure: an #EAsyncClosure
  *
@@ -2195,479 +2200,6 @@ e_data_server_util_get_dbus_call_timeout (void)
 }
 
 /**
- * e_named_parameters_new:
- *
- * Creates a new instance of an #ENamedParameters. This should be freed
- * with e_named_parameters_free(), when no longer needed. Names are
- * compared case insensitively.
- *
- * The structure is not thread safe, if the caller requires thread safety,
- * then it should provide it on its own.
- *
- * Returns: newly allocated #ENamedParameters
- *
- * Since: 3.8
- **/
-ENamedParameters *
-e_named_parameters_new (void)
-{
-	return (ENamedParameters *) g_ptr_array_new_with_free_func ((GDestroyNotify) e_util_safe_free_string);
-}
-
-/**
- * e_named_parameters_new_strv:
- * @strv: NULL-terminated string array to be used as a content of a newly
- *     created #ENamedParameters
- *
- * Creates a new instance of an #ENamedParameters, with initial content
- * being taken from @strv. This should be freed with e_named_parameters_free(),
- * when no longer needed. Names are compared case insensitively.
- *
- * The structure is not thread safe, if the caller requires thread safety,
- * then it should provide it on its own.
- *
- * Returns: newly allocated #ENamedParameters
- *
- * Since: 3.8
- **/
-ENamedParameters *
-e_named_parameters_new_strv (const gchar * const *strv)
-{
-	ENamedParameters *parameters;
-	gint ii;
-
-	g_return_val_if_fail (strv != NULL, NULL);
-
-	parameters = e_named_parameters_new ();
-	for (ii = 0; strv[ii]; ii++) {
-		g_ptr_array_add ((GPtrArray *) parameters, g_strdup (strv[ii]));
-	}
-
-	return parameters;
-}
-
-/**
- * e_named_parameters_new_string:
- * @str: a string to be used as a content of a newly created #ENamedParameters
- *
- * Creates a new instance of an #ENamedParameters, with initial content being
- * taken from @str. This should be freed with e_named_parameters_free(),
- * when no longer needed. Names are compared case insensitively.
- *
- * The @str should be created with e_named_parameters_to_string(), to be
- * properly encoded.
- *
- * The structure is not thread safe, if the caller requires thread safety,
- * then it should provide it on its own.
- *
- * Returns: (transfer full): newly allocated #ENamedParameters
- *
- * Since: 3.18
- **/
-ENamedParameters *
-e_named_parameters_new_string (const gchar *str)
-{
-	ENamedParameters *parameters;
-	gchar **split;
-	gint ii;
-
-	g_return_val_if_fail (str != NULL, NULL);
-
-	split = g_strsplit (str, "\n", -1);
-
-	parameters = e_named_parameters_new ();
-	for (ii = 0; split && split[ii]; ii++) {
-		g_ptr_array_add ((GPtrArray *) parameters, g_strcompress (split[ii]));
-	}
-
-	g_strfreev (split);
-
-	return parameters;
-}
-
-/**
- * e_named_parameters_new_clone:
- * @parameters: an #ENamedParameters to be used as a content of a newly
- *    created #ENamedParameters
- *
- * Creates a new instance of an #ENamedParameters, with initial content
- * being taken from @parameters. This should be freed with e_named_parameters_free(),
- * when no longer needed. Names are compared case insensitively.
- *
- * The structure is not thread safe, if the caller requires thread safety,
- * then it should provide it on its own.
- *
- * Returns: newly allocated #ENamedParameters
- *
- * Since: 3.16
- **/
-ENamedParameters *
-e_named_parameters_new_clone (const ENamedParameters *parameters)
-{
-	ENamedParameters *clone;
-
-	clone = e_named_parameters_new ();
-	if (parameters)
-		e_named_parameters_assign (clone, parameters);
-
-	return clone;
-}
-
-/**
- * e_named_parameters_free:
- * @parameters: (nullable): an #ENamedParameters
- *
- * Frees an instance of #ENamedParameters, previously allocated
- * with e_named_parameters_new(). Function does nothing, if
- * @parameters is %NULL.
- *
- * Since: 3.8
- **/
-void
-e_named_parameters_free (ENamedParameters *parameters)
-{
-	if (!parameters)
-		return;
-
-	g_ptr_array_unref ((GPtrArray *) parameters);
-}
-
-/**
- * e_named_parameters_clear:
- * @parameters: an #ENamedParameters
- *
- * Removes all stored parameters from @parameters.
- *
- * Since: 3.8
- **/
-void
-e_named_parameters_clear (ENamedParameters *parameters)
-{
-	GPtrArray *array;
-	g_return_if_fail (parameters != NULL);
-
-	array = (GPtrArray *) parameters;
-
-	if (array->len)
-		g_ptr_array_remove_range (array, 0, array->len);
-}
-
-/**
- * e_named_parameters_assign:
- * @parameters: an #ENamedParameters to assign values to
- * @from: (nullable): an #ENamedParameters to get values from, or %NULL
- *
- * Makes content of the @parameters the same as @from.
- * Functions clears content of @parameters if @from is %NULL.
- *
- * Since: 3.8
- **/
-void
-e_named_parameters_assign (ENamedParameters *parameters,
-                           const ENamedParameters *from)
-{
-	g_return_if_fail (parameters != NULL);
-
-	e_named_parameters_clear (parameters);
-
-	if (from) {
-		gint ii;
-		GPtrArray *from_array = (GPtrArray *) from;
-
-		for (ii = 0; ii < from_array->len; ii++) {
-			g_ptr_array_add (
-				(GPtrArray *) parameters,
-				g_strdup (from_array->pdata[ii]));
-		}
-	}
-}
-
-static gint
-get_parameter_index (const ENamedParameters *parameters,
-                     const gchar *name)
-{
-	GPtrArray *array;
-	gint ii, name_len;
-
-	g_return_val_if_fail (parameters != NULL, -1);
-	g_return_val_if_fail (name != NULL, -1);
-
-	name_len = strlen (name);
-
-	array = (GPtrArray *) parameters;
-
-	for (ii = 0; ii < array->len; ii++) {
-		const gchar *name_and_value = g_ptr_array_index (array, ii);
-
-		if (name_and_value == NULL || strlen (name_and_value) <= name_len)
-			continue;
-
-		if (name_and_value[name_len] != ':')
-			continue;
-
-		if (g_ascii_strncasecmp (name_and_value, name, name_len) == 0)
-			return ii;
-	}
-
-	return -1;
-}
-
-/**
- * e_named_parameters_set:
- * @parameters: an #ENamedParameters
- * @name: name of a parameter to set
- * @value: (nullable): value to set, or %NULL to unset
- *
- * Sets parameter named @name to value @value. If @value is NULL,
- * then the parameter is removed. @value can be an empty string.
- *
- * Note: There is a restriction on parameter names, it cannot be empty or
- * contain a colon character (':'), otherwise it can be pretty much anything.
- *
- * Since: 3.8
- **/
-void
-e_named_parameters_set (ENamedParameters *parameters,
-                        const gchar *name,
-                        const gchar *value)
-{
-	GPtrArray *array;
-	gint index;
-	gchar *name_and_value;
-
-	g_return_if_fail (parameters != NULL);
-	g_return_if_fail (name != NULL);
-	g_return_if_fail (strchr (name, ':') == NULL);
-	g_return_if_fail (*name != '\0');
-
-	array = (GPtrArray *) parameters;
-
-	index = get_parameter_index (parameters, name);
-	if (!value) {
-		if (index != -1)
-			g_ptr_array_remove_index (array, index);
-		return;
-	}
-
-	name_and_value = g_strconcat (name, ":", value, NULL);
-	if (index != -1) {
-		g_free (array->pdata[index]);
-		array->pdata[index] = name_and_value;
-	} else {
-		g_ptr_array_add (array, name_and_value);
-	}
-}
-
-/**
- * e_named_parameters_get:
- * @parameters: an #ENamedParameters
- * @name: name of a parameter to get
- *
- * Returns current value of a parameter with name @name. If not such
- * exists, then returns %NULL.
- *
- * Returns: (nullable): value of a parameter named @name, or %NULL.
- *
- * Since: 3.8
- **/
-const gchar *
-e_named_parameters_get (const ENamedParameters *parameters,
-                        const gchar *name)
-{
-	gint index;
-	const gchar *name_and_value;
-
-	g_return_val_if_fail (parameters != NULL, NULL);
-	g_return_val_if_fail (name != NULL, NULL);
-
-	index = get_parameter_index (parameters, name);
-	if (index == -1)
-		return NULL;
-
-	name_and_value = g_ptr_array_index ((GPtrArray *) parameters, index);
-
-	return name_and_value + strlen (name) + 1;
-}
-
-/**
- * e_named_parameters_test:
- * @parameters: an #ENamedParameters
- * @name: name of a parameter to test
- * @value: value to test
- * @case_sensitively: whether to compare case sensitively
- *
- * Compares current value of parameter named @name with given @value
- * and returns whether they are equal, either case sensitively or
- * insensitively, based on @case_sensitively argument. Function
- * returns %FALSE, if no such parameter exists.
- *
- * Returns: Whether parameter of given name has stored value of given value.
- *
- * Since: 3.8
- **/
-gboolean
-e_named_parameters_test (const ENamedParameters *parameters,
-                         const gchar *name,
-                         const gchar *value,
-                         gboolean case_sensitively)
-{
-	const gchar *stored_value;
-
-	g_return_val_if_fail (parameters != NULL, FALSE);
-	g_return_val_if_fail (name != NULL, FALSE);
-	g_return_val_if_fail (value != NULL, FALSE);
-
-	stored_value = e_named_parameters_get (parameters, name);
-	if (!stored_value)
-		return FALSE;
-
-	if (case_sensitively)
-		return strcmp (stored_value, value) == 0;
-
-	return g_ascii_strcasecmp (stored_value, value) == 0;
-}
-
-/**
- * e_named_parameters_to_strv:
- * @parameters: an #ENamedParameters
- *
- * Returns: (transfer full): Contents of @parameters as a null-terminated strv
- *
- * Since: 3.8
- */
-gchar **
-e_named_parameters_to_strv (const ENamedParameters *parameters)
-{
-	GPtrArray *array = (GPtrArray *) parameters;
-	GPtrArray *ret = g_ptr_array_new ();
-
-	if (array) {
-		guint i;
-		for (i = 0; i < array->len; i++) {
-			g_ptr_array_add (ret, g_strdup (array->pdata[i]));
-		}
-	}
-
-	g_ptr_array_add (ret, NULL);
-
-	return (gchar **) g_ptr_array_free (ret, FALSE);
-}
-
-/**
- * e_named_parameters_to_string:
- * @parameters: an #ENamedParameters
- *
- * Returns: (transfer full) (nullable): Contents of @parameters as a string
- *
- * Since: 3.18
- */
-gchar *
-e_named_parameters_to_string (const ENamedParameters *parameters)
-{
-	gchar **strv, *str;
-	gint ii;
-
-	strv = e_named_parameters_to_strv (parameters);
-	if (!strv)
-		return NULL;
-
-	for (ii = 0; strv[ii]; ii++) {
-		gchar *name_and_value = strv[ii];
-
-		strv[ii] = g_strescape (name_and_value, "");
-		g_free (name_and_value);
-	}
-
-	str = g_strjoinv ("\n", strv);
-
-	g_strfreev (strv);
-
-	return str;
-}
-
-/**
- * e_named_parameters_exists:
- * @parameters: an #ENamedParameters
- * @name: name of the parameter whose existence to check
- *
- * Returns: Whether @parameters holds a parameter named @name
- *
- * Since: 3.18
- **/
-gboolean
-e_named_parameters_exists (const ENamedParameters *parameters,
-			   const gchar *name)
-{
-	g_return_val_if_fail (parameters != NULL, FALSE);
-	g_return_val_if_fail (name != NULL, FALSE);
-
-	return get_parameter_index (parameters, name) != -1;
-}
-
-/**
- * e_named_parameters_count:
- * @parameters: an #ENamedParameters
- *
- * Returns: The number of stored named parameters in @parameters
- *
- * Since: 3.18
- **/
-guint
-e_named_parameters_count (const ENamedParameters *parameters)
-{
-	g_return_val_if_fail (parameters != NULL, 0);
-
-	return ((GPtrArray *) parameters)->len;
-}
-
-/**
- * e_named_parameters_get_name:
- * @parameters: an #ENamedParameters
- * @index: an index of the parameter whose name to retrieve
- *
- * Returns: (transfer full) (nullable): The name of the parameters at index @index,
- *    or %NULL, of the @index is out of bounds or other error. The returned
- *    string should be freed with g_free() when done with it.
- *
- * Since: 3.18
- **/
-gchar *
-e_named_parameters_get_name (const ENamedParameters *parameters,
-			     gint index)
-{
-	const gchar *name_and_value, *colon;
-
-	g_return_val_if_fail (parameters != NULL, NULL);
-	g_return_val_if_fail (index >= 0 && index < e_named_parameters_count (parameters), NULL);
-
-	name_and_value = g_ptr_array_index ((GPtrArray *) parameters, index);
-	colon = name_and_value ? strchr (name_and_value, ':') : NULL;
-
-	if (!colon || colon == name_and_value)
-		return NULL;
-
-	return g_strndup (name_and_value, colon - name_and_value);
-}
-
-static ENamedParameters *
-e_named_parameters_ref (ENamedParameters *params)
-{
-	return (ENamedParameters *) g_ptr_array_ref ((GPtrArray *) params);
-}
-
-static void
-e_named_parameters_unref (ENamedParameters *params)
-{
-	g_ptr_array_unref ((GPtrArray *) params);
-}
-
-G_DEFINE_BOXED_TYPE (
-	ENamedParameters,
-	e_named_parameters,
-	e_named_parameters_ref,
-	e_named_parameters_unref);
-
-/**
  * e_named_timeout_add:
  * @interval: the time between calls to the function, in milliseconds
  *            (1/1000ths of a second)
@@ -2764,13 +2296,22 @@ e_timeout_add_with_name (gint priority,
                          gpointer data,
                          GDestroyNotify notify)
 {
+	GSource *source;
 	guint tag;
 
 	g_return_val_if_fail (function != NULL, 0);
 
-	tag = g_timeout_add_full (
-		priority, interval, function, data, notify);
-	g_source_set_name_by_id (tag, name);
+	source = g_timeout_source_new (interval);
+
+	if (priority != G_PRIORITY_DEFAULT)
+		g_source_set_priority (source, priority);
+
+	g_source_set_callback (source, function, data, notify);
+	g_source_set_name (source, name);
+
+	tag = g_source_attach (source, NULL);
+
+	g_source_unref (source);
 
 	return tag;
 }
@@ -2805,13 +2346,22 @@ e_timeout_add_seconds_with_name (gint priority,
                                  gpointer data,
                                  GDestroyNotify notify)
 {
+	GSource *source;
 	guint tag;
 
 	g_return_val_if_fail (function != NULL, 0);
 
-	tag = g_timeout_add_seconds_full (
-		priority, interval, function, data, notify);
-	g_source_set_name_by_id (tag, name);
+	source = g_timeout_source_new_seconds (interval);
+
+	if (priority != G_PRIORITY_DEFAULT)
+		g_source_set_priority (source, priority);
+
+	g_source_set_callback (source, function, data, notify);
+	g_source_set_name (source, name);
+
+	tag = g_source_attach (source, NULL);
+
+	g_source_unref (source);
 
 	return tag;
 }
@@ -3304,6 +2854,7 @@ e_util_can_use_collection_as_credential_source (ESource *collection_source,
 
 				can_use_collection = !method_source || !method_collection ||
 					g_ascii_strcasecmp (method_source, "none") == 0 ||
+					g_ascii_strcasecmp (method_collection, "none") == 0 ||
 					g_ascii_strcasecmp (method_source, method_collection) == 0;
 
 				g_free (method_source);
@@ -3442,4 +2993,147 @@ e_util_get_directory_variants (const gchar *main_path,
 	g_return_val_if_fail (replace_prefix && *replace_prefix, NULL);
 
 	return camel_util_get_directory_variants (main_path, replace_prefix, with_modules_dir);
+}
+
+/**
+ * e_util_change_uri_component:
+ * @inout_uri: (inout): a #GUri
+ * @component: a string #SoupURIComponent to change
+ * @value: (nullable): a value to set, or %NULL to unset
+ *
+ * Changes component @component in the @inout_uri to value @value.
+ * As the #GUri cannot be modified the @inout_uri points to a new #GUri
+ * at the end of the call and the previous structure is unreffed.
+ *
+ * See: e_util_change_uri_port()
+ *
+ * Since: 3.46
+ **/
+void
+e_util_change_uri_component (GUri **inout_uri,
+			     SoupURIComponent component,
+			     const gchar *value)
+{
+	GUri *tmp;
+
+	g_return_if_fail (inout_uri != NULL);
+	g_return_if_fail (*inout_uri != NULL);
+	g_return_if_fail (component != SOUP_URI_PORT);
+	g_return_if_fail (component != SOUP_URI_NONE);
+
+	/* Make sure the default port is not "inherited" when changing scheme */
+	if (component == SOUP_URI_SCHEME && value && (
+	    g_uri_get_port (*inout_uri) == 80 ||
+	    g_uri_get_port (*inout_uri) == 443) && (
+	    g_ascii_strcasecmp (value, "http") == 0 ||
+	    g_ascii_strcasecmp (value, "https") == 0)) {
+		tmp = soup_uri_copy (*inout_uri,
+			component, value,
+			SOUP_URI_PORT, g_ascii_strcasecmp (value, "http") == 0 ? 80 : 443,
+			SOUP_URI_NONE);
+	} else {
+		tmp = soup_uri_copy (*inout_uri, component, value, SOUP_URI_NONE);
+	}
+
+	g_uri_unref (*inout_uri);
+	*inout_uri = tmp;
+}
+
+/**
+ * e_util_change_uri_port:
+ * @inout_uri: (inout): a #GUri
+ * @port: the port number to set
+ *
+ * Changes the port in the @inout_uri to value @port.
+ * As the #GUri cannot be modified the @inout_uri points to a new #GUri
+ * at the end of the call and the previous structure is unreffed.
+ *
+ * See: e_util_change_uri_component()
+ *
+ * Since: 3.46
+ **/
+void
+e_util_change_uri_port (GUri **inout_uri,
+			gint port)
+{
+	GUri *tmp;
+
+	g_return_if_fail (inout_uri != NULL);
+	g_return_if_fail (*inout_uri != NULL);
+
+	tmp = soup_uri_copy (*inout_uri, SOUP_URI_PORT, port, SOUP_URI_NONE);
+	g_uri_unref (*inout_uri);
+	*inout_uri = tmp;
+}
+
+/**
+ * e_util_call_malloc_trim: (skip)
+ *
+ * Calls malloc_trim() to free unused heap memory. The function
+ * does nothing, when the malloc_trim() is not available.
+ *
+ * This might be called after some operations which may use a lot
+ * of memory temporarily.
+ *
+ * Since: 3.48
+ **/
+void
+e_util_call_malloc_trim (void)
+{
+#ifdef HAVE_MALLOC_TRIM
+	malloc_trim (0);
+#endif
+}
+
+/**
+ * e_util_guess_source_is_readonly:
+ * @source: an #ESource
+ *
+ * Guesses whether the @source is read only. This is done on some heuristic
+ * like the source backend, where some are known to be read only. That this
+ * function returns %FALSE does not necessarily mean the source is writable,
+ * it only means the source is not well-known read-only source. To know
+ * for sure open the corresponding #EClient, if the @source references such,
+ * and use e_client_is_readonly().
+ *
+ * Returns: %TRUE, when the @source is well-known read-only source, or %FALSE otherwise
+ *
+ * Since: 3.50
+ **/
+gboolean
+e_util_guess_source_is_readonly	(ESource *source)
+{
+	gboolean res = FALSE;
+
+	g_return_val_if_fail (E_IS_SOURCE (source), FALSE);
+
+	if (e_source_has_extension (source, E_SOURCE_EXTENSION_ADDRESS_BOOK)) {
+		/* no well-known always read-only book backend */
+	} else {
+		ESourceBackend *backend_extension = NULL;
+
+		if (e_source_has_extension (source, E_SOURCE_EXTENSION_CALENDAR))
+			backend_extension = e_source_get_extension (source, E_SOURCE_EXTENSION_CALENDAR);
+		else if (e_source_has_extension (source, E_SOURCE_EXTENSION_MEMO_LIST))
+			backend_extension = e_source_get_extension (source, E_SOURCE_EXTENSION_MEMO_LIST);
+		else if (e_source_has_extension (source, E_SOURCE_EXTENSION_TASK_LIST))
+			backend_extension = e_source_get_extension (source, E_SOURCE_EXTENSION_TASK_LIST);
+
+		if (backend_extension) {
+			const gchar *backend_name;
+
+			e_source_extension_property_lock (E_SOURCE_EXTENSION (backend_extension));
+
+			backend_name = e_source_backend_get_backend_name (backend_extension);
+
+			res = backend_name && (
+				g_ascii_strcasecmp (backend_name, "contacts") == 0 ||
+				g_ascii_strcasecmp (backend_name, "weather") == 0 ||
+				g_ascii_strcasecmp (backend_name, "webcal") == 0);
+
+			e_source_extension_property_unlock (E_SOURCE_EXTENSION (backend_extension));
+		}
+	}
+
+	return res;
 }

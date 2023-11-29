@@ -69,7 +69,26 @@
  **/
 #define CAMEL_CIPHER_CERT_INFO_PROPERTY_SIGNERS_ALT_EMAILS "signers-alt-emails"
 
+/**
+ * CAMEL_CIPHER_CONTEXT_ERROR:
+ *
+ * Since: 3.50
+ **/
+#define CAMEL_CIPHER_CONTEXT_ERROR (camel_cipher_context_error_quark ())
+
 G_BEGIN_DECLS
+
+GQuark		camel_cipher_context_error_quark	(void) G_GNUC_CONST;
+
+/**
+ * CamelCipherContextError:
+ * @CAMEL_CIPHER_CONTEXT_ERROR_KEY_NOT_FOUND: one or more recipient's public key was not found
+ *
+ * Since: 3.50
+ **/
+typedef enum {
+	CAMEL_CIPHER_CONTEXT_ERROR_KEY_NOT_FOUND
+} CamelCipherContextError;
 
 typedef gpointer (* CamelCipherCloneFunc) (gpointer value);
 
@@ -303,7 +322,7 @@ void		camel_cipher_validity_init	(CamelCipherValidity *validity);
 gboolean	camel_cipher_validity_get_valid	(CamelCipherValidity *validity);
 void		camel_cipher_validity_set_valid	(CamelCipherValidity *validity,
 						 gboolean valid);
-gchar *		camel_cipher_validity_get_description
+const gchar *	camel_cipher_validity_get_description
 						(CamelCipherValidity *validity);
 void		camel_cipher_validity_set_description
 						(CamelCipherValidity *validity,

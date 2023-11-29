@@ -546,8 +546,11 @@ user_tag (struct _CamelSExp *f,
 		r->value.string = g_strdup ("(followup_completed_on IS NULL OR followup_completed_on='')");
 	else if (g_strcmp0 (argv[0]->value.string, "follow-up") == 0)
 		r->value.string = g_strdup ("(followup_flag IS NULL)");
-	else
+	else {
+		gboolean *pcontains_unknown_column = (gboolean *) data;
+		*pcontains_unknown_column = TRUE;
 		r->value.string = g_strdup ("usertags");
+	}
 
 	return r;
 }
@@ -831,8 +834,9 @@ static struct {
  * Converts a search expression to an SQL 'WHERE' part statement,
  * without the 'WHERE' keyword.
  *
- * Returns: (transfer full): a newly allocated string, an SQL 'WHERE' part statement,
- *    or %NULL, when could not convert it. Free it with g_free(), when done with it.
+ * Returns: (transfer full) (nullable): a newly allocated string, an SQL
+ *    'WHERE' part statement, or %NULL, when could not convert it. Free it with
+ *    g_free(), when done with it.
  *
  * Since: 2.26
  **/

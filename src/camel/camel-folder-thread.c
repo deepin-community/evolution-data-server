@@ -449,7 +449,7 @@ sort_node_cb (gconstpointer a,
 			g_hash_table_insert (times_cache, (gpointer) b1, ptime2);
 		}
 
-		if (*ptime1 != *ptime2)
+		if (ptime1 && ptime2 && *ptime1 != *ptime2)
 			return *ptime1 < *ptime2 ? -1 : 1;
 	}
 
@@ -927,7 +927,7 @@ camel_folder_thread_messages_add (CamelFolderThread *thread,
 	for (i = 0; i < summary->len; i++) {
 		CamelMessageInfo *info = summary->pdata[i];
 
-		/* check its not already there, we dont want duplicates */
+		/* check it is not already there, we don't want duplicates */
 		if (g_hash_table_lookup (table, camel_message_info_get_uid (info)) == NULL)
 			g_ptr_array_add (all, info);
 	}

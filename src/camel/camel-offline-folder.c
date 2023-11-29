@@ -174,7 +174,7 @@ offline_folder_downsync_background (CamelSession *session,
 		   the whole “%s : %s” is meant as an absolute identification of the folder. */
 		cancellable, _("Downloading new messages for offline mode in “%s : %s”"),
 		camel_service_get_display_name (CAMEL_SERVICE (camel_folder_get_parent_store (data->folder))),
-		camel_folder_get_full_name (data->folder));
+		camel_folder_get_full_display_name (data->folder));
 
 	limit_time = offline_folder_get_limit_time (data->folder);
 
@@ -259,7 +259,7 @@ offline_folder_changed (CamelFolder *folder,
 		   the whole “%s : %s” is meant as an absolute identification of the folder. */
 		description = g_strdup_printf (_("Checking download of new messages for offline in “%s : %s”"),
 			camel_service_get_display_name (CAMEL_SERVICE (store)),
-			camel_folder_get_full_name (folder));
+			camel_folder_get_full_display_name (folder));
 
 		camel_session_submit_job (
 			session, description, (CamelSessionCallback)
@@ -335,7 +335,7 @@ offline_folder_downsync_sync (CamelOfflineFolder *offline,
 	   the whole “%s : %s” is meant as an absolute identification of the folder. */
 	camel_operation_push_message (cancellable, _("Syncing messages in folder “%s : %s” to disk"),
 		camel_service_get_display_name (CAMEL_SERVICE (camel_folder_get_parent_store (folder))),
-		camel_folder_get_full_name (folder));
+		camel_folder_get_full_display_name (folder));
 
 	limit_time = offline_folder_get_limit_time (folder);
 	if (limit_time > 0 && camel_folder_get_folder_summary (folder)) {
@@ -430,7 +430,7 @@ offline_folder_downsync_sync (CamelOfflineFolder *offline,
 			camel_operation_push_message (cancellable, _("Syncing message %d of %d in folder “%s : %s” to disk"),
 				i + 1, uncached_uids->len,
 				camel_service_get_display_name (CAMEL_SERVICE (camel_folder_get_parent_store (folder))),
-				camel_folder_get_full_name (folder));
+				camel_folder_get_full_display_name (folder));
 
 			/* Stop on failure */
 			if (!offline_folder_synchronize_message_wrapper_sync (folder, uid, cancellable, &local_error)) {
@@ -582,7 +582,7 @@ camel_offline_folder_can_downsync (CamelOfflineFolder *folder)
 /**
  * camel_offline_folder_downsync_sync:
  * @folder: a #CamelOfflineFolder
- * @expression: search expression describing which set of messages
+ * @expression: (nullable): search expression describing which set of messages
  *              to downsync (%NULL for all)
  * @cancellable: optional #GCancellable object, or %NULL
  * @error: return location for a #GError, or %NULL
@@ -644,7 +644,7 @@ offline_folder_downsync_thread (GTask *task,
 /**
  * camel_offline_folder_downsync:
  * @folder: a #CamelOfflineFolder
- * @expression: search expression describing which set of messages
+ * @expression: (nullable): search expression describing which set of messages
  *              to downsync (%NULL for all)
  * @io_priority: the I/O priority of the request
  * @cancellable: optional #GCancellable object, or %NULL

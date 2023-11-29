@@ -235,8 +235,6 @@ camel_uuencode_close (guchar *in,
 			*bufptr++ = CAMEL_UUENCODE_CHAR (((b1 << 2) | ((b2 >> 6) & 0x3)) & 0x3f);
 			*bufptr++ = CAMEL_UUENCODE_CHAR (b2 & 0x3f);
 
-			i = 0;
-			saved = 0;
 			uulen += 3;
 		}
 	}
@@ -1092,7 +1090,7 @@ decode_8bit (const gchar *text,
 		}
 	} while (inleft > 0);
 
-	while ((rc = g_iconv (cd, NULL, NULL, &outbuf, &outleft)) == (gsize) -1) {
+	while (g_iconv (cd, NULL, NULL, &outbuf, &outleft) == (gsize) -1) {
 		if (errno != E2BIG)
 			break;
 
@@ -1620,9 +1618,9 @@ header_encode_string_rfc2047 (const guchar *in,
                               gboolean include_lwsp)
 {
 	const guchar *inptr = in, *start, *word;
-	gboolean last_was_encoded = FALSE;
-	gboolean last_was_space = FALSE;
-	const gchar *charset;
+	gboolean last_was_encoded;
+	gboolean last_was_space;
+	const gchar *charset = NULL;
 	gint encoding;
 	GString *out;
 
@@ -1640,11 +1638,14 @@ header_encode_string_rfc2047 (const guchar *in,
 	if (*inptr == '\0')
 		return g_strdup ((gchar *) in);
 
-	/* This gets each word out of the input, and checks to see what charset
-	 * can be used to encode it. */
+	/* This gets each word out of the input, and checks to see what charset can be
+	 * used to encode it. The same charset (the first or UTF-8) is used for all words. */
 	/* TODO: Work out when to merge subsequent words, or across word-parts */
 	out = g_string_new ("");
+ restart:
 	inptr = in;
+	last_was_encoded = FALSE;
+	last_was_space = FALSE;
 	encoding = 0;
 	word = NULL;
 	start = inptr;
@@ -1680,14 +1681,36 @@ header_encode_string_rfc2047 (const guchar *in,
 				if (last_was_encoded)
 					g_string_append_c (out, ' ');
 
-				rfc2047_encode_word (out, (const gchar *) start, inptr - start, "ISO-8859-1", CAMEL_MIME_IS_ESAFE);
+				if (!charset)
+					charset = "ISO-8859-1";
+				else if (g_ascii_strcasecmp (charset, "UTF-8") != 0 && g_ascii_strcasecmp (charset, "ISO-8859-1") != 0) {
+					/* Use the UTF-8, when different words require different character sets */
+					g_string_truncate (out, 0);
+					charset = "UTF-8";
+					goto restart;
+				}
+				rfc2047_encode_word (out, (const gchar *) start, inptr - start, charset, CAMEL_MIME_IS_ESAFE);
 				last_was_encoded = TRUE;
 				break;
 			case 2:
 				if (last_was_encoded)
 					g_string_append_c (out, ' ');
 
-				if (!(charset = camel_charset_best ((const gchar *) start, inptr - start)))
+				if (charset && g_ascii_strcasecmp (charset, "UTF-8") != 0) {
+					const gchar *would_use_charset;
+
+					if (!(would_use_charset = camel_charset_best ((const gchar *) start, inptr - start)))
+						would_use_charset = "UTF-8";
+
+					if (g_ascii_strcasecmp (would_use_charset, charset) != 0) {
+						/* Use the UTF-8, when different words require different character sets */
+						g_string_truncate (out, 0);
+						charset = "UTF-8";
+						goto restart;
+					}
+				}
+
+				if (!charset && !(charset = camel_charset_best ((const gchar *) start, inptr - start)))
 					charset = "UTF-8";
 				rfc2047_encode_word (out, (const gchar *) start, inptr - start, charset, CAMEL_MIME_IS_ESAFE);
 				last_was_encoded = TRUE;
@@ -1728,13 +1751,35 @@ header_encode_string_rfc2047 (const guchar *in,
 			if (last_was_encoded)
 				g_string_append_c (out, ' ');
 
-			rfc2047_encode_word (out, (const gchar *) start, inptr - start, "ISO-8859-1", CAMEL_MIME_IS_ESAFE);
+			if (!charset)
+				charset = "ISO-8859-1";
+			else if (g_ascii_strcasecmp (charset, "UTF-8") != 0 && g_ascii_strcasecmp (charset, "ISO-8859-1") != 0) {
+				/* Use the UTF-8, when different words require different character sets */
+				g_string_truncate (out, 0);
+				charset = "UTF-8";
+				goto restart;
+			}
+			rfc2047_encode_word (out, (const gchar *) start, inptr - start, charset, CAMEL_MIME_IS_ESAFE);
 			break;
 		case 2:
 			if (last_was_encoded)
 				g_string_append_c (out, ' ');
 
-			if (!(charset = camel_charset_best ((const gchar *) start, inptr - start)))
+			if (charset && g_ascii_strcasecmp (charset, "UTF-8") != 0) {
+				const gchar *would_use_charset;
+
+				if (!(would_use_charset = camel_charset_best ((const gchar *) start, inptr - start)))
+					would_use_charset = "UTF-8";
+
+				if (g_ascii_strcasecmp (would_use_charset, charset) != 0) {
+					/* Use the UTF-8, when different words require different character sets */
+					g_string_truncate (out, 0);
+					charset = "UTF-8";
+					goto restart;
+				}
+			}
+
+			if (!charset && !(charset = camel_charset_best ((const gchar *) start, inptr - start)))
 				charset = "UTF-8";
 			rfc2047_encode_word (out, (const gchar *) start, inptr - start, charset, CAMEL_MIME_IS_ESAFE);
 			break;
@@ -1813,12 +1858,14 @@ word_types_compatable (enum _phrase_word_t type1,
 /* split the input into words with info about each word
  * merge common word types clean up */
 static GList *
-header_encode_phrase_get_words (const guchar *in)
+header_encode_phrase_get_words (const guchar *in,
+				const gchar **out_charset)
 {
 	const guchar *inptr = in, *start, *last;
 	struct _phrase_word *word;
 	enum _phrase_word_t type;
 	gint encoding, count = 0;
+	gboolean has_encoding_2 = FALSE;
 	GList *words = NULL;
 
 	/* break the input into words */
@@ -1852,6 +1899,19 @@ header_encode_phrase_get_words (const guchar *in)
 				word->encoding = encoding;
 				words = g_list_append (words, word);
 				count = 0;
+
+				if (encoding > 0 && (!*out_charset || g_ascii_strcasecmp (*out_charset, "UTF-8") != 0)) {
+					const gchar *charset;
+
+					if (!(charset = camel_charset_best ((const gchar *) word->start, word->end - word->start)))
+						charset = "UTF-8";
+
+					/* Use the UTF-8, when different words require different character sets */
+					if (!*out_charset)
+						*out_charset = charset;
+					else if (g_ascii_strcasecmp (*out_charset, charset) != 0)
+						*out_charset = "UTF-8";
+				}
 			}
 
 			start = inptr;
@@ -1868,6 +1928,7 @@ header_encode_phrase_get_words (const guchar *in)
 			} else if (c >= 256) {
 				type = WORD_2047;
 				encoding = MAX (encoding, 2);
+				has_encoding_2 = TRUE;
 			}
 		}
 
@@ -1881,6 +1942,31 @@ header_encode_phrase_get_words (const guchar *in)
 		word->type = type;
 		word->encoding = encoding;
 		words = g_list_append (words, word);
+
+		if (encoding > 0 && (!*out_charset || g_ascii_strcasecmp (*out_charset, "UTF-8") != 0)) {
+			const gchar *charset;
+
+			if (!(charset = camel_charset_best ((const gchar *) word->start, word->end - word->start)))
+				charset = "UTF-8";
+
+			/* Use the UTF-8, when different words require different character sets */
+			if (!*out_charset)
+				*out_charset = charset;
+			else if (g_ascii_strcasecmp (*out_charset, charset) != 0)
+				*out_charset = "UTF-8";
+		}
+	}
+
+	/* Make sure all encodings are of the same type */
+	if (has_encoding_2) {
+		GList *link;
+
+		for (link = words; link; link = g_list_next (link)) {
+			word = link->data;
+
+			if (word->type == WORD_2047 && word->encoding == 1)
+				word->encoding = 2;
+		}
 	}
 
 	return words;
@@ -1950,13 +2036,13 @@ camel_header_encode_phrase (const guchar *in)
 {
 	struct _phrase_word *word = NULL, *last_word = NULL;
 	GList *words, *wordl;
-	const gchar *charset;
+	const gchar *charset = NULL;
 	GString *out;
 
 	if (in == NULL)
 		return NULL;
 
-	words = header_encode_phrase_get_words (in);
+	words = header_encode_phrase_get_words (in, &charset);
 	if (!words)
 		return NULL;
 
@@ -2002,24 +2088,24 @@ camel_header_encode_phrase (const guchar *in)
 			}
 
 			if (word->encoding == 1) {
-				rfc2047_encode_word (out, start, len, "ISO-8859-1", CAMEL_MIME_IS_PSAFE);
+				if (!charset)
+					charset = "ISO-8859-1";
+				rfc2047_encode_word (out, start, len, charset, CAMEL_MIME_IS_PSAFE);
 			} else {
-				if (!(charset = camel_charset_best (start, len)))
+				if (!charset && !(charset = camel_charset_best (start, len)))
 					charset = "UTF-8";
 				rfc2047_encode_word (out, start, len, charset, CAMEL_MIME_IS_PSAFE);
 			}
 			break;
 		}
 
-		g_free (last_word);
 		wordl = g_list_next (wordl);
 
 		last_word = word;
 	}
 
 	/* and we no longer need the list */
-	g_free (word);
-	g_list_free (words);
+	g_list_free_full (words, g_free);
 
 	return g_string_free (out, FALSE);
 }
@@ -2432,7 +2518,7 @@ camel_content_type_set_param (CamelContentType *t,
 
 /**
  * camel_content_type_is:
- * @content_type: A content type specifier, or %NULL.
+ * @content_type: (nullable): A content type specifier, or %NULL.
  * @type: A type to check against.
  * @subtype: A subtype to check against, or "*" to match any subtype.
  *
@@ -2618,7 +2704,7 @@ header_decode_addrspec (const gchar **in)
 				w (g_warning ("Invalid address spec: %s", *in));
 			}
 		}
-		if (*inptr == '@') {
+		while (*inptr == '@') {
 			inptr++;
 			g_string_append_c (addr, '@');
 			word = header_decode_domain (&inptr);
@@ -2628,8 +2714,6 @@ header_decode_addrspec (const gchar **in)
 			} else {
 				w (g_warning ("Invalid address, missing domain: %s", *in));
 			}
-		} else {
-			w (g_warning ("Invalid addr-spec, missing @: %s", *in));
 		}
 	} else {
 		w (g_warning ("invalid addr-spec, no local part"));
@@ -2693,10 +2777,10 @@ header_decode_mailbox (const gchar **in,
 				gsize l = strlen (last);
 				gsize p = strlen (pre);
 
-				/* dont append ' ' between sucsessive encoded words */
+				/* don't append ' ' between successive encoded words */
 				if ((l > 6 && last[l - 2] == '?' && last[l - 1] == '=')
 				    && (p > 6 && pre[0] == '=' && pre[1] == '?')) {
-					/* dont append ' ' */
+					/* don't append ' ' */
 				} else {
 					g_string_append_c (name, ' ');
 				}
@@ -3128,7 +3212,9 @@ camel_header_contentid_decode (const gchar *in)
 }
 
 static void
-header_references_decode_single (const gchar **in, GSList **list)
+header_references_decode_single (const gchar **in,
+				 gboolean *had_valid_value,
+				 GSList **list)
 {
 	const gchar *inptr = *in;
 	GString *accum_word = NULL;
@@ -3139,30 +3225,33 @@ header_references_decode_single (const gchar **in, GSList **list)
 		if (*inptr == '<') {
 			id = header_msgid_decode_internal (&inptr);
 			if (id) {
+				*had_valid_value = TRUE;
 				*list = g_slist_prepend (*list, id);
 				break;
 			}
 		} else {
 			word = header_decode_word (&inptr);
 			if (word) {
-				/* To support broken clients, which do not enclose message IDs into angle brackets, as
-				   required in the RFC 2822: https://tools.ietf.org/html/rfc2822#section-3.6.4 */
-				if (!*inptr || camel_mime_is_lwsp (*inptr)) {
-					if (accum_word) {
-						g_string_append (accum_word, word);
-						*list = g_slist_prepend (*list, g_string_free (accum_word, FALSE));
-						accum_word = NULL;
+				if (!*had_valid_value) {
+					/* To support broken clients, which do not enclose message IDs into angle brackets, as
+					   required in the RFC 2822: https://tools.ietf.org/html/rfc2822#section-3.6.4 */
+					if (!*inptr || camel_mime_is_lwsp (*inptr)) {
+						if (accum_word) {
+							g_string_append (accum_word, word);
+							*list = g_slist_prepend (*list, g_string_free (accum_word, FALSE));
+							accum_word = NULL;
+						} else {
+							*list = g_slist_prepend (*list, word);
+							word = NULL;
+						}
 					} else {
-						*list = g_slist_prepend (*list, word);
-						word = NULL;
-					}
-				} else {
-					if (accum_word)
-						g_string_append (accum_word, word);
-					else
-						accum_word = g_string_new (word);
+						if (accum_word)
+							g_string_append (accum_word, word);
+						else
+							accum_word = g_string_new (word);
 
-					g_string_append_c (accum_word, *inptr);
+						g_string_append_c (accum_word, *inptr);
+					}
 				}
 				g_free (word);
 			} else if (*inptr != '\0')
@@ -3188,12 +3277,13 @@ GSList *
 camel_header_references_decode (const gchar *in)
 {
 	GSList *refs = NULL;
+	gboolean had_valid_value = FALSE;
 
 	if (in == NULL || in[0] == '\0')
 		return NULL;
 
 	while (*in)
-		header_references_decode_single (&in, &refs);
+		header_references_decode_single (&in, &had_valid_value, &refs);
 
 	return refs;
 }
@@ -4070,7 +4160,7 @@ struct _date_token {
 static struct _date_token *
 datetok (const gchar *date)
 {
-	struct _date_token *tokens = NULL, *token, *tail = (struct _date_token *) &tokens;
+	struct _date_token *tokens = NULL, *token, **tail = &tokens;
 	const gchar *start, *end;
 	guchar mask;
 
@@ -4097,8 +4187,8 @@ datetok (const gchar *date)
 			token->len = end - start;
 			token->mask = mask;
 
-			tail->next = token;
-			tail = token;
+			*tail = token;
+			tail = &token->next;
 		}
 
 		if (*end)
@@ -4609,10 +4699,10 @@ camel_header_location_decode (const gchar *in)
 
 /**
  * camel_header_msgid_generate:
- * @domain: domain to use (like "example.com") for the ID suffix; can be NULL
+ * @domain: (nullable): domain to use (like "example.com") for the ID suffix; can be %NULL
  *
  * Either the @domain is used, or the user's local hostname,
- * in case it's NULL or empty.
+ * in case it's %NULL or empty.
  *
  * Returns: Unique message ID.
  **/

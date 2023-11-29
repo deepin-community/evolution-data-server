@@ -1214,7 +1214,7 @@ remove_contact_reply (GObject *source_object,
 /**
  * e_book_remove_contacts:
  * @book: an #EBook
- * @ids: (element-type utf8): an #GList of const gchar *id's
+ * @ids: (element-type utf8): a #GList of const gchar *id's
  * @error: a #GError to set on failure
  *
  * Removes the contacts with ids from the list @ids from @book.  This is
@@ -1659,8 +1659,8 @@ get_book_view_reply (GObject *source_object,
  * e_book_async_get_book_view:
  * @book: an #EBook
  * @query: an #EBookQuery
- * @requested_fields: (element-type utf8): a #GList containing the names of
- *                    fields to return, or NULL for all
+ * @requested_fields: (element-type utf8) (nullable): a #GList containing
+ *    the names of fields to return, or %NULL for all
  * @max_results: the maximum number of contacts to show (or 0 for all)
  * @cb: (scope async): a function to call when the operation finishes
  * @closure: data to pass to callback function
@@ -2385,7 +2385,7 @@ e_book_get_source (EBook *book)
 /**
  * e_book_get_static_capabilities:
  * @book: an #EBook
- * @error: an #GError to set on failure
+ * @error: a #GError to set on failure
  *
  * Get the list of capabilities which the backend for this address book
  * supports. This string should not be freed.

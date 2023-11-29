@@ -131,6 +131,7 @@ static CamelSExpResult *do_copy (struct _CamelSExp *f, gint argc, struct _CamelS
 static CamelSExpResult *do_move (struct _CamelSExp *f, gint argc, struct _CamelSExpResult **argv, CamelFilterDriver *);
 static CamelSExpResult *do_stop (struct _CamelSExp *f, gint argc, struct _CamelSExpResult **argv, CamelFilterDriver *);
 static CamelSExpResult *do_label (struct _CamelSExp *f, gint argc, struct _CamelSExpResult **argv, CamelFilterDriver *);
+static CamelSExpResult *do_unset_label (struct _CamelSExp *f, gint argc, struct _CamelSExpResult **argv, CamelFilterDriver *);
 static CamelSExpResult *do_color (struct _CamelSExp *f, gint argc, struct _CamelSExpResult **argv, CamelFilterDriver *);
 static CamelSExpResult *do_score (struct _CamelSExp *f, gint argc, struct _CamelSExpResult **argv, CamelFilterDriver *);
 static CamelSExpResult *do_adjust_score (struct _CamelSExp *f, gint argc, struct _CamelSExpResult **argv, CamelFilterDriver *);
@@ -167,6 +168,7 @@ static struct {
 	{ "move-to",           (CamelSExpFunc) do_move,      0 },
 	{ "stop",              (CamelSExpFunc) do_stop,      0 },
 	{ "set-label",         (CamelSExpFunc) do_label,     0 },
+	{ "unset-label",       (CamelSExpFunc) do_unset_label, 0 },
 	{ "set-color",         (CamelSExpFunc) do_color,    0 },
 	{ "set-score",         (CamelSExpFunc) do_score,     0 },
 	{ "adjust-score",      (CamelSExpFunc) do_adjust_score, 0 },
@@ -263,7 +265,7 @@ filter_driver_process_transfers (CamelFilterDriver *driver,
 		   the whole “%s : %s” is meant as an absolute identification of the folder. */
 		camel_operation_push_message (cancellable, _("Transferring filtered messages in “%s : %s”"),
 			camel_service_get_display_name (CAMEL_SERVICE (parent_store)),
-			camel_folder_get_full_name (driver->priv->source));
+			camel_folder_get_full_display_name (driver->priv->source));
 
 		ii = 0;
 		sz = g_hash_table_size (driver->priv->transfers);
@@ -920,6 +922,77 @@ do_label (struct _CamelSExp *f,
 }
 
 static CamelSExpResult *
+do_unset_label (struct _CamelSExp *f,
+		gint argc,
+		struct _CamelSExpResult **argv,
+		CamelFilterDriver *driver)
+{
+	d (fprintf (stderr, "unsetting label tag\n"));
+	if (argc > 0 && argv[0]->type == CAMEL_SEXP_RES_STRING) {
+		/* This is a list of new labels, we should use these in case of passing in old names.
+		 * This all is required only because backward compatibility. */
+		const gchar *new_labels[] = { "$Labelimportant", "$Labelwork", "$Labelpersonal", "$Labeltodo", "$Labellater", NULL};
+		const gchar *label;
+		gboolean any_unset = FALSE;
+		gint ii, jj;
+
+		for (jj = 0; jj < argc; jj++) {
+			label = argv[jj]->value.string;
+
+			for (ii = 0; new_labels[ii]; ii++) {
+				if (label && strcmp (new_labels[ii] + 6, label) == 0) {
+					label = new_labels[ii];
+					break;
+				}
+			}
+
+			if (driver->priv->source && driver->priv->uid && camel_folder_has_summary_capability (driver->priv->source)) {
+				if (camel_folder_get_message_user_flag (driver->priv->source, driver->priv->uid, label)) {
+					camel_folder_set_message_user_flag (driver->priv->source, driver->priv->uid, label, FALSE);
+					camel_filter_driver_log (driver, FILTER_LOG_ACTION, "Unset label '%s'", label);
+					any_unset = TRUE;
+				}
+			} else if (camel_message_info_get_user_flag (driver->priv->info, label)) {
+				camel_message_info_set_user_flag (driver->priv->info, label, FALSE);
+				camel_filter_driver_log (driver, FILTER_LOG_ACTION, "Unset label '%s'", label);
+				any_unset = TRUE;
+			}
+		}
+
+		if (!any_unset) {
+			if (argc == 1) {
+				camel_filter_driver_log (driver, FILTER_LOG_ACTION, "Unset label '%s'", label);
+			} else {
+				GString *str = g_string_new ("");
+
+				for (jj = 0; jj < argc; jj++) {
+					label = argv[jj]->value.string;
+
+					for (ii = 0; new_labels[ii]; ii++) {
+						if (label && strcmp (new_labels[ii] + 6, label) == 0) {
+							label = new_labels[ii];
+							break;
+						}
+					}
+
+					if (str->len)
+						g_string_append (str, ", ");
+					g_string_append_c (str, '\'');
+					g_string_append (str, label);
+					g_string_append_c (str, '\'');
+				}
+
+				camel_filter_driver_log (driver, FILTER_LOG_ACTION, "Unset labels %s", str->str);
+
+				g_string_free (str, TRUE);
+			}
+		}
+	}
+
+	return NULL;
+}
+
+static CamelSExpResult *
 do_color (struct _CamelSExp *f,
           gint argc,
           struct _CamelSExpResult **argv,
@@ -1000,17 +1073,51 @@ set_flag (struct _CamelSExp *f,
 
 	d (fprintf (stderr, "setting flag\n"));
 	if (argc == 1 && argv[0]->type == CAMEL_SEXP_RES_STRING) {
+		gboolean set_flag = TRUE;
 		flags = camel_system_flag (argv[0]->value.string);
-		if (driver->priv->source && driver->priv->uid && camel_folder_has_summary_capability (driver->priv->source))
-			camel_folder_set_message_flags (
-				driver->priv->source, driver->priv->uid, flags, ~0);
-		else
-			camel_message_info_set_flags (
-				driver->priv->info, flags |
-				CAMEL_MESSAGE_FOLDER_FLAGGED, ~0);
-		camel_filter_driver_log (
-			driver, FILTER_LOG_ACTION,
-			"Set %s flag", argv[0]->value.string);
+		if ((flags & CAMEL_MESSAGE_JUNK_LEARN) != 0) {
+			CamelJunkFilter *junk_filter;
+
+			junk_filter = camel_session_get_junk_filter (driver->priv->session);
+			if (junk_filter) {
+				GError *local_error = NULL;
+
+				if (!driver->priv->message) {
+					/* FIXME Pass a GCancellable */
+					driver->priv->message = camel_folder_get_message_sync (
+						driver->priv->source,
+						driver->priv->uid, NULL,
+						&local_error);
+					if (!driver->priv->message) {
+						camel_filter_driver_log (driver, FILTER_LOG_ACTION, "Cannot learn junk, failed to get message: %s",
+							local_error ? local_error->message : "Unknown error");
+					}
+					g_clear_error (&local_error);
+				}
+
+				/* FIXME Pass a GCancellable */
+				if (driver->priv->message && !camel_junk_filter_learn_junk (junk_filter, driver->priv->message, NULL, &local_error)) {
+					camel_filter_driver_log (driver, FILTER_LOG_ACTION, "Failed to learn junk: %s",
+						local_error ? local_error->message : "Unknown error");
+				} else if (driver->priv->message) {
+					camel_filter_driver_log (driver, FILTER_LOG_ACTION, "Learn junk");
+					set_flag = FALSE;
+				}
+
+				g_clear_error (&local_error);
+			} else {
+				camel_filter_driver_log (driver, FILTER_LOG_ACTION, "Cannot learn junk, no junk filter set");
+			}
+		}
+
+		if (set_flag) {
+			if (driver->priv->source && driver->priv->uid && camel_folder_has_summary_capability (driver->priv->source))
+				camel_folder_set_message_flags (driver->priv->source, driver->priv->uid, flags, ~0);
+			else
+				camel_message_info_set_flags (driver->priv->info, flags | CAMEL_MESSAGE_FOLDER_FLAGGED, ~0);
+
+			camel_filter_driver_log (driver, FILTER_LOG_ACTION, "Set %s flag", argv[0]->value.string);
+		}
 	}
 
 	return NULL;
@@ -1754,8 +1861,8 @@ fail:
  * @driver: CamelFilterDriver
  * @folder: CamelFolder to be filtered
  * @cache: UID cache (needed for POP folders)
- * @uids: (element-type utf8): message uids to be filtered or NULL (as a
- *        shortcut to filter all messages)
+ * @uids: (element-type utf8) (nullable): message uids to be filtered or
+ *         %NULL (as a shortcut to filter all messages)
  * @remove: TRUE to mark filtered messages as deleted
  * @cancellable: optional #GCancellable object, or %NULL
  * @error: return location for a #GError, or %NULL
@@ -1861,6 +1968,17 @@ camel_filter_driver_filter_folder (CamelFilterDriver *driver,
 	if (cache)
 		camel_uid_cache_save (cache);
 
+	if (camel_folder_has_summary_capability (folder)) {
+		/* Unset message headers on the infos, which are meant only for filtering,
+		   which just finished, thus the memory can be freed now */
+		for (i = 0; i < uids->len; i++) {
+			info = camel_folder_get_message_info (folder, uids->pdata[i]);
+			if (info)
+				camel_message_info_take_headers (info, NULL);
+			g_clear_object (&info);
+		}
+	}
+
 	if (driver->priv->defaultfolder) {
 		report_status (
 			driver, CAMEL_FILTER_STATUS_PROGRESS,
@@ -1932,7 +2050,6 @@ filter_driver_filter_message_internal (CamelFilterDriver *driver,
 	gboolean filtered = FALSE;
 	CamelSExpResult *r;
 	GList *list, *link;
-	gint result;
 
 	g_return_val_if_fail (message != NULL || (source != NULL && uid != NULL), -1);
 
@@ -1991,12 +2108,12 @@ filter_driver_filter_message_internal (CamelFilterDriver *driver,
 	}
 
 	list = g_queue_peek_head_link (&driver->priv->rules);
-	result = CAMEL_SEARCH_NOMATCH;
 	filtered = list != NULL;
 
 	for (link = list; link != NULL; link = g_list_next (link)) {
 		struct _filter_rule *rule = link->data;
 		struct _get_message data;
+		gint result;
 
 		if (driver->priv->terminated) {
 			camel_filter_driver_log (driver, FILTER_LOG_INFO, "Stopped processing per request");
@@ -2171,12 +2288,12 @@ filter_driver_filter_message_internal (CamelFilterDriver *driver,
 /**
  * camel_filter_driver_filter_message:
  * @driver: CamelFilterDriver
- * @message: message to filter or NULL
- * @info: message info or NULL
- * @uid: message uid or NULL
- * @source: source folder or NULL
- * @store_uid: UID of source store, or %NULL
- * @original_store_uid: UID of source store (pre-movemail), or %NULL
+ * @message: (nullable): message to filter or %NULL
+ * @info: (nullable): message info or %NULL
+ * @uid: (nullable): message uid or %NULL
+ * @source: (nullable): source folder or %NULL
+ * @store_uid: (nullable): UID of source store, or %NULL
+ * @original_store_uid: (nullable): UID of source store (pre-movemail), or %NULL
  * @cancellable: optional #GCancellable object, or %NULL
  * @error: return location for a #GError, or %NULL
  *

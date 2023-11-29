@@ -191,7 +191,7 @@ cmd_tocache (CamelPOP3Engine *pe,
 
 	/* We write an '*' to the start of the stream to say its not complete yet */
 	/* This should probably be part of the cache code */
-	if ((n = camel_stream_write (fi->stream, "*", 1, cancellable, &local_error)) == -1)
+	if (camel_stream_write (fi->stream, "*", 1, cancellable, &local_error) == -1)
 		goto done;
 
 	while ((n = camel_stream_read ((CamelStream *) stream, buffer, sizeof (buffer), cancellable, &local_error)) > 0) {
@@ -750,7 +750,7 @@ pop3_folder_refresh_info_sync (CamelFolder *folder,
 		}
 	}
 
-	/* dont need this anymore */
+	/* don't need this anymore */
 	g_hash_table_destroy (pop3_folder->uids_id);
 	pop3_folder->uids_id = NULL;
 
@@ -1048,7 +1048,7 @@ camel_pop3_folder_new (CamelStore *parent,
 	if (camel_service_get_connection_status (CAMEL_SERVICE (parent)) != CAMEL_SERVICE_CONNECTED)
 		return folder;
 
-	/* mt-ok, since we dont have the folder-lock for new() */
+	/* mt-ok, since we don't have the folder-lock for new() */
 	if (!camel_folder_refresh_info_sync (folder, cancellable, error)) {
 		g_object_unref (folder);
 		folder = NULL;

@@ -78,8 +78,6 @@ imapx_tokenise (register const gchar *str,
 	return 0;
 }
 
-static const gchar * rename_label_flag (const gchar *flag, gint len, gboolean server_to_evo);
-
 /* flag table */
 static struct {
 	const gchar *name;
@@ -154,9 +152,7 @@ imapx_parse_flags (CamelIMAPXInputStream *stream,
 				const gchar *flag_name;
 				gchar *utf8;
 
-				flag_name = rename_label_flag (
-					(gchar *) token,
-					strlen ((gchar *) token), TRUE);
+				flag_name = imapx_rename_label_flag ((const gchar *) token, TRUE);
 
 				utf8 = camel_utf7_utf8 (flag_name);
 				if (utf8 && !g_utf8_validate (utf8, -1, NULL)) {
@@ -187,19 +183,16 @@ imapx_parse_flags (CamelIMAPXInputStream *stream,
 }
 
 /*
- * rename_flag
  * Converts label flag name on server to name used in Evolution or back.
- * if the flags does not match returns the original one as it is.
+ * If the flag does not match any known, returns the original one as it is.
  * It will never return NULL, it will return empty string, instead.
  *
  * @flag: Flag to rename.
- * @len: Length of the flag name.
  * @server_to_evo: if TRUE, then converting server names to evo's names, if FALSE then opposite.
  */
-static const gchar *
-rename_label_flag (const gchar *flag,
-                   gint len,
-                   gboolean server_to_evo)
+const gchar *
+imapx_rename_label_flag (const gchar *flag,
+			 gboolean server_to_evo)
 {
 	gint i;
 	const gchar *labels[] = {
@@ -212,11 +205,11 @@ rename_label_flag (const gchar *flag,
 
 	/* It really can pass zero-length flags inside, in that case it was able
 	 * to always add first label, which is definitely wrong. */
-	if (!len || !flag || !*flag)
+	if (!flag || !*flag)
 		return "";
 
 	for (i = 0 + (server_to_evo ? 0 : 1); labels[i]; i = i + 2) {
-		if (!g_ascii_strncasecmp (flag, labels[i], len))
+		if (!g_ascii_strcasecmp (flag, labels[i]))
 			return labels[i + (server_to_evo ? 1 : -1)];
 	}
 
@@ -258,7 +251,7 @@ imapx_write_flags (GString *string,
 				continue;
 
 
-			flag_name = rename_label_flag (name, strlen (name), FALSE);
+			flag_name = imapx_rename_label_flag (name, FALSE);
 
 			if (!first)
 				g_string_append_c (string, ' ');
@@ -318,8 +311,7 @@ imapx_update_message_info_flags (CamelMessageInfo *info,
                                  guint32 server_flags,
                                  const CamelNamedFlags *server_user_flags,
                                  guint32 permanent_flags,
-                                 CamelFolder *folder,
-                                 gboolean unsolicited)
+                                 CamelFolder *folder)
 {
 	gboolean changed = FALSE;
 	CamelIMAPXMessageInfo *xinfo = CAMEL_IMAPX_MESSAGE_INFO (info);
@@ -1323,7 +1315,7 @@ imapx_parse_envelope (CamelIMAPXInputStream *stream,
 		camel_header_address_list_clear (&addr_from);
 	}
 
-	/* we dont keep reply_to */
+	/* we don't keep reply_to */
 
 	/* env_reply_to    ::= "(" 1*address ")" / nil */
 	addr = imapx_parse_address_list (stream, cancellable, &local_error);
@@ -1356,7 +1348,7 @@ imapx_parse_envelope (CamelIMAPXInputStream *stream,
 	if (local_error)
 		goto error;
 
-	/* we dont keep bcc either */
+	/* we don't keep bcc either */
 
 	/* env_bcc         ::= "(" 1*address ")" / nil */
 	addr = imapx_parse_address_list (stream, cancellable, &local_error);
@@ -1702,7 +1694,7 @@ imapx_parse_section (CamelIMAPXInputStream *stream,
 	/* header_list     ::= "(" 1#header_fld_name ")"
 	 * header_fld_name ::= astring */
 
-	/* we dont need the header specifiers */
+	/* we don't need the header specifiers */
 	tok = camel_imapx_input_stream_token (
 		stream, &token, &len, cancellable, NULL);
 
@@ -2700,7 +2692,7 @@ imapx_parse_status (CamelIMAPXInputStream *stream,
 		if (!success)
 			goto fail;
 
-		/* ignore anything we dont know about */
+		/* ignore anything we don't know about */
 		do {
 			tok = camel_imapx_input_stream_token (
 				stream, &token, &len, cancellable, NULL);
@@ -2947,7 +2939,7 @@ exit:
  *
  * If an error occurs, the function sets @error and returns %NULL.
  *
- * Returns: a newly-allocated mailbox name, or %NULL
+ * Returns: a newly-allocated mailbox name, or %NULL on error
  *
  * Since: 3.10
  **/
@@ -3018,6 +3010,30 @@ camel_imapx_normalize_mailbox (gchar *mailbox_name,
 		mailbox_name[3] = 'O';
 		mailbox_name[4] = 'X';
 	}
+}
+
+/**
+ * camel_imapx_normalize_inbox_name:
+ * @mailbox_name: a mailbox name
+ *
+ * The Inbox folder name is case insensitive, thus use this
+ * function to normalize the name to be all letters in upper
+ * case, if the passed in @mailbox_name is "Inbox". Otherwise
+ * returns the @mailbox_name as is.
+ *
+ * Returns: Normalized Inbox name or the @mailbox_name.
+ *
+ * Since: 3.48
+ **/
+const gchar *
+camel_imapx_normalize_inbox_name (const gchar *mailbox_name)
+{
+	g_return_val_if_fail (mailbox_name != NULL, NULL);
+
+	if (camel_imapx_mailbox_is_inbox (mailbox_name))
+		return "INBOX";
+
+	return mailbox_name;
 }
 
 /**

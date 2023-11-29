@@ -311,7 +311,7 @@ text_index_sync (CamelIndex *idx)
 
 	CAMEL_TEXT_INDEX_LOCK (idx, lock);
 
-	/* we sync, bump down the cache limits since we dont need them for reading */
+	/* we sync, bump down the cache limits since we don't need them for reading */
 	camel_block_file_set_cache_limit (p->blocks, 128);
 	/* this doesn't really need to be dropped, its only used in updates anyway */
 	p->word_cache_limit = 1024;
@@ -399,7 +399,6 @@ text_index_compress_nosync (CamelIndex *idx)
 	CamelTextIndexPrivate *newp, *oldp;
 	camel_key_t oldkeyid, newkeyid;
 	GHashTable *remap;
-	guint deleted;
 	camel_block_t data, newdata;
 	gint i, ret = -1;
 	gchar *name = NULL;
@@ -453,7 +452,6 @@ text_index_compress_nosync (CamelIndex *idx)
 	io (printf ("Copying undeleted names to new file\n"));
 	remap = g_hash_table_new (NULL, NULL);
 	oldkeyid = 0;
-	deleted = 0;
 	while ((oldkeyid = camel_key_table_next (oldp->name_index, oldkeyid, &name, &flags, &data))) {
 		if ((flags&1) == 0) {
 			io (printf ("copying name '%s'\n", name));
@@ -470,7 +468,6 @@ text_index_compress_nosync (CamelIndex *idx)
 		}
 		g_free (name);
 		name = NULL;
-		deleted |= flags;
 	}
 
 	/* Copy word data across, remapping/deleting and create new index for it */
@@ -535,6 +532,8 @@ text_index_compress_nosync (CamelIndex *idx)
 
 	/* If this fails, we'll pick up something during restart? */
 	ret = camel_index_rename ((CamelIndex *) newidx, oldpath);
+	if (ret == -1)
+		goto fail;
 
 #define myswap(a, b) { gpointer tmp = a; a = b; b = tmp; }
 	/* Poke the private data across to the new object */
@@ -1600,7 +1599,7 @@ camel_text_index_name_new (CamelTextIndex *idx,
 	CamelIndexName *cin = &idn->parent;
 	CamelTextIndexNamePrivate *p = CAMEL_TEXT_INDEX_NAME (idn)->priv;
 
-	cin->index = g_object_ref (idx);
+	cin->index = CAMEL_INDEX (g_object_ref (idx));
 	cin->name = camel_mempool_strdup (p->pool, name);
 	p->nameid = nameid;
 
@@ -1692,7 +1691,7 @@ camel_text_index_cursor_new (CamelTextIndex *idx,
 	CamelIndexCursor *cic = &idc->parent;
 	CamelTextIndexCursorPrivate *p = CAMEL_TEXT_INDEX_CURSOR (idc)->priv;
 
-	cic->index = g_object_ref (idx);
+	cic->index = CAMEL_INDEX (g_object_ref (idx));
 	p->first = data;
 	p->next = data;
 	p->record_count = 0;
@@ -1787,7 +1786,7 @@ camel_text_index_key_cursor_new (CamelTextIndex *idx,
 	CamelIndexCursor *cic = &idc->parent;
 	CamelTextIndexKeyCursorPrivate *p = CAMEL_TEXT_INDEX_KEY_CURSOR (idc)->priv;
 
-	cic->index = g_object_ref (idx);
+	cic->index = CAMEL_INDEX (g_object_ref (idx));
 	p->table = g_object_ref (table);
 
 	return idc;

@@ -1026,7 +1026,7 @@ camel_folder_summary_get_visible_count (CamelFolderSummary *summary)
 /**
  * camel_folder_summary_set_index:
  * @summary: a #CamelFolderSummary object
- * @index: a #CamelIndex
+ * @index: (nullable): a #CamelIndex
  *
  * Set the index used to index body content.  If the index is %NULL, or
  * not set (the default), no indexing of body content will take place.
@@ -1050,7 +1050,7 @@ camel_folder_summary_set_index (CamelFolderSummary *summary,
  * camel_folder_summary_get_index:
  * @summary: a #CamelFolderSummary object
  *
- * Returns: (transfer none): a #CamelIndex used to index body content.
+ * Returns: (transfer none) (nullable): a #CamelIndex used to index body content.
  *
  * Since: 3.4
  **/
@@ -1661,7 +1661,7 @@ cfs_try_release_memory (gpointer user_data)
 	   the whole “%s : %s” is meant as an absolute identification of the folder. */
 	description = g_strdup_printf (_("Release unused memory for folder “%s : %s”"),
 		camel_service_get_display_name (CAMEL_SERVICE (parent_store)),
-		camel_folder_get_full_name (summary->priv->folder));
+		camel_folder_get_full_display_name (summary->priv->folder));
 
 	camel_session_submit_job (
 		session, description,
@@ -1694,17 +1694,16 @@ cfs_schedule_info_release_timer (CamelFolderSummary *summary)
 		/* FIXME[disk-summary] LRU please and not timeouts */
 		if (can_do) {
 			GWeakRef *weakref;
+			GSource *source;
 
 			weakref = g_slice_new0 (GWeakRef);
 			g_weak_ref_init (weakref, summary);
 
-			summary->priv->timeout_handle = g_timeout_add_seconds_full (
-				G_PRIORITY_DEFAULT, SUMMARY_CACHE_DROP,
-				cfs_try_release_memory,
-				weakref, cfs_free_weakref);
-			g_source_set_name_by_id (
-				summary->priv->timeout_handle,
-				"[camel] cfs_try_release_memory");
+			source = g_timeout_source_new_seconds (SUMMARY_CACHE_DROP);
+			g_source_set_callback (source, cfs_try_release_memory, weakref, cfs_free_weakref);
+			g_source_set_name (source, "[camel] cfs_try_release_memory");
+			summary->priv->timeout_handle = g_source_attach (source, NULL);
+			g_source_unref (source);
 		}
 	}
 
@@ -2047,7 +2046,7 @@ save_to_db_cb (gpointer key,
 
 	/* Reset the dirty flag which decides if the changes are synced to the DB or not.
 	The FOLDER_FLAGGED should be used to check if the changes are synced to the server.
-	So, dont unset the FOLDER_FLAGGED flag */
+	So, don't unset the FOLDER_FLAGGED flag */
 	camel_message_info_set_dirty (mi, FALSE);
 
 	camel_db_camel_mir_free (mir);
@@ -2351,6 +2350,7 @@ summary_assign_uid (CamelFolderSummary *summary,
 
 		if (mi == info) {
 			camel_message_info_property_unlock (info);
+			camel_message_info_set_abort_notifications (info, FALSE);
 			return FALSE;
 		}
 
@@ -2535,7 +2535,7 @@ camel_folder_summary_info_new_from_parser (CamelFolderSummary *summary,
 			camel_mime_filter_index_set_name (CAMEL_MIME_FILTER_INDEX (summary->priv->filter_index), name);
 		}
 
-		/* always scan the content info, even if we dont save it */
+		/* always scan the content info, even if we don't save it */
 		summary_traverse_content_with_parser (summary, info, mp);
 
 		if (name && summary->priv->index) {
@@ -2908,6 +2908,13 @@ summary_format_address (const CamelNameValueArray *headers,
 	if ((addr = camel_header_address_decode (text, charset))) {
 		str = camel_header_address_list_format (addr);
 		camel_header_address_list_clear (&addr);
+
+		/* Special-case empty email part only here, not in the camel_header_address_list_format(),
+		   to cover only the user-visible string, which looks odd with the empty email address. */
+		if (str && g_str_has_suffix (str, " <>") && strlen (str) > 3) {
+			str[strlen (str) - 3] = '\0';
+		}
+
 		g_free (text);
 	} else {
 		str = text;
@@ -3051,7 +3058,11 @@ message_info_new_from_headers (CamelFolderSummary *summary,
 	if (ct)
 		camel_content_type_unref (ct);
 
-	camel_message_info_take_headers (mi, camel_name_value_array_copy (headers));
+	/* Headers are meant to be used when filtering, to speed things up.
+	   Do not save them, when the folder is not expected to be filtered. */
+	if (summary && summary->priv->folder &&
+	    (camel_folder_get_flags (summary->priv->folder) & (CAMEL_FOLDER_FILTER_RECENT | CAMEL_FOLDER_FILTER_JUNK)) != 0)
+		camel_message_info_take_headers (mi, camel_name_value_array_copy (headers));
 
 	camel_message_info_set_abort_notifications (mi, FALSE);
 
@@ -3351,6 +3362,7 @@ static struct flag_names_t {
 	{ "junk", CAMEL_MESSAGE_JUNK },
 	{ "notjunk", CAMEL_MESSAGE_NOTJUNK },
 	{ "secure", CAMEL_MESSAGE_SECURE },
+	{ "junklearn", CAMEL_MESSAGE_JUNK_LEARN },
 	{ NULL, 0 }
 };
 
@@ -3394,7 +3406,7 @@ camel_system_flag_get (CamelMessageFlags flags,
 
 /**
  * camel_message_info_new_from_headers:
- * @summary: a #CamelFolderSummary object or %NULL
+ * @summary: (nullable): a #CamelFolderSummary object or %NULL
  * @headers: a #CamelNameValueArray
  *
  * Create a new #CamelMessageInfo pre-populated with info from

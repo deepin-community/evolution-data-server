@@ -37,6 +37,7 @@ set(DEPENDENCIES
 set(SOURCES
 	e-address-western.c
 	e-book-contacts-utils.c
+	e-book-indices-updater.c
 	e-book-query.c
 	e-contact.c
 	e-name-western.c
@@ -51,8 +52,10 @@ set(SOURCES
 set(HEADERS
 	libebook-contacts.h
 	e-address-western.h
+	e-book-contacts-autocleanups.h
 	e-book-contacts-enums.h
 	e-book-contacts-utils.h
+	e-book-indices-updater.h
 	e-book-query.h
 	e-contact.h
 	e-name-western.h
@@ -76,6 +79,10 @@ if(ENABLE_PHONENUMBER)
 		-DG_LOG_DOMAIN=\"e-phone-number\"
 		-DLIBEBOOK_CONTACTS_COMPILATION
 		${PHONENUMBER_DEFINITIONS}
+	)
+
+	target_compile_features(ephonenumber-private PUBLIC
+		cxx_std_14
 	)
 
 	target_compile_options(ephonenumber-private PUBLIC
@@ -153,7 +160,7 @@ install(FILES ${HEADERS}
 
 set(gir_sources ${SOURCES} ${HEADERS})
 set(gir_identifies_prefixes E)
-set(gir_includes GObject-2.0 GLib-2.0 Gio-2.0 libxml2-2.0)
+set(gir_includes GObject-2.0 GLib-2.0 Gio-2.0)
 set(gir_cflags
 	-DLIBEBOOK_CONTACTS_COMPILATION
 	-I${CMAKE_BINARY_DIR}/src/addressbook

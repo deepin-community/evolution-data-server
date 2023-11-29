@@ -67,6 +67,7 @@ enum {
 	PROP_SESSION
 };
 
+G_DEFINE_QUARK (camel-cipher-context-error-quark, camel_cipher_context_error)
 G_DEFINE_TYPE_WITH_PRIVATE (CamelCipherContext, camel_cipher_context, G_TYPE_OBJECT)
 
 G_DEFINE_BOXED_TYPE (CamelCipherValidity,
@@ -101,10 +102,11 @@ static void
 cipher_context_set_session (CamelCipherContext *context,
                             CamelSession *session)
 {
-	g_return_if_fail (CAMEL_IS_SESSION (session));
+	if (session)
+		g_return_if_fail (CAMEL_IS_SESSION (session));
 	g_return_if_fail (context->priv->session == NULL);
 
-	context->priv->session = g_object_ref (session);
+	context->priv->session = session ? g_object_ref (session) : NULL;
 }
 
 static void
@@ -599,15 +601,16 @@ camel_cipher_context_verify_finish (CamelCipherContext *context,
 /**
  * camel_cipher_context_encrypt_sync:
  * @context: a #CamelCipherContext
- * @userid: key ID (or email address) to use when signing, or %NULL to not sign
+ * @userid: (nullable): unused
  * @recipients: (element-type utf8): an array of recipient key IDs and/or email addresses
  * @ipart: clear-text #CamelMimePart
  * @opart: cipher-text #CamelMimePart
  * @cancellable: optional #GCancellable object, or %NULL
  * @error: return location for a #GError, or %NULL
  *
- * Encrypts (and optionally signs) the clear-text @ipart and writes the
- * resulting cipher-text to @opart.
+ * Encrypts the clear-text @ipart and writes the resulting cipher-text to @opart.
+ *
+ * Note: The @userid is unused, %NULL should be passed for it.
  *
  * Returns: %TRUE on success, %FALSE on error
  *
@@ -644,7 +647,7 @@ camel_cipher_context_encrypt_sync (CamelCipherContext *context,
 	camel_operation_push_message (cancellable, _("Encrypting message"));
 
 	success = class->encrypt_sync (
-		context, userid, recipients,
+		context, NULL, recipients,
 		ipart, opart, cancellable, error);
 	CAMEL_CHECK_GERROR (context, encrypt_sync, success, error);
 
@@ -686,7 +689,7 @@ cipher_context_encrypt_thread (GTask *task,
 /**
  * camel_cipher_context_encrypt:
  * @context: a #CamelCipherContext
- * @userid: key id (or email address) to use when signing, or %NULL to not sign
+ * @userid: (nullable): unused
  * @recipients: (element-type utf8): an array of recipient key IDs and/or email addresses
  * @ipart: clear-text #CamelMimePart
  * @opart: cipher-text #CamelMimePart
@@ -695,12 +698,14 @@ cipher_context_encrypt_thread (GTask *task,
  * @callback: a #GAsyncReadyCallback to call when the request is satisfied
  * @user_data: data to pass to the callback function
  *
- * Asynchronously encrypts (and optionally signs) the clear-text @ipart and
+ * Asynchronously encrypts the clear-text @ipart and
  * writes the resulting cipher-text to @opart.
  *
  * When the operation is finished, @callback will be called.  You can
  * then call camel_cipher_context_encrypt_finish() to get the result of
  * the operation.
+ *
+ * Note: The @userid is unused, %NULL should be passed for it.
  *
  * Since: 3.0
  **/
@@ -724,7 +729,7 @@ camel_cipher_context_encrypt (CamelCipherContext *context,
 	g_return_if_fail (CAMEL_IS_MIME_PART (opart));
 
 	async_context = g_slice_new0 (AsyncContext);
-	async_context->userid = g_strdup (userid);
+	async_context->userid = NULL;
 	async_context->strings = g_ptr_array_new ();
 	async_context->ipart = g_object_ref (ipart);
 	async_context->opart = g_object_ref (opart);
@@ -1034,7 +1039,7 @@ camel_cipher_validity_set_valid (CamelCipherValidity *validity,
 	validity->sign.status = valid ? CAMEL_CIPHER_VALIDITY_SIGN_GOOD : CAMEL_CIPHER_VALIDITY_SIGN_BAD;
 }
 
-gchar *
+const gchar *
 camel_cipher_validity_get_description (CamelCipherValidity *validity)
 {
 	g_return_val_if_fail (validity != NULL, NULL);
@@ -1492,7 +1497,7 @@ camel_cipher_certinfo_set_property (CamelCipherCertInfo *cert_info,
 
 /**
  * camel_cipher_context_new:
- * @session: a #CamelSession
+ * @session: (nullable): a #CamelSession
  *
  * This creates a new CamelCipherContext object which is used to sign,
  * verify, encrypt and decrypt streams.
@@ -1502,7 +1507,8 @@ camel_cipher_certinfo_set_property (CamelCipherCertInfo *cert_info,
 CamelCipherContext *
 camel_cipher_context_new (CamelSession *session)
 {
-	g_return_val_if_fail (session != NULL, NULL);
+	if (session)
+		g_return_val_if_fail (CAMEL_IS_SESSION (session), NULL);
 
 	return g_object_new (
 		CAMEL_TYPE_CIPHER_CONTEXT,
@@ -1513,7 +1519,7 @@ camel_cipher_context_new (CamelSession *session)
  * camel_cipher_context_get_session:
  * @context: a #CamelCipherContext
  *
- * Returns: (transfer none):
+ * Returns: (transfer none) (nullable): a #CamelSession the @context had been created with
  *
  * Since: 2.32
  **/
