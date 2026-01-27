@@ -38,7 +38,7 @@ eos_yahoo_guess_can_process (EOAuth2Service *service,
 			      const gchar *hostname)
 {
 	return hostname &&
-		e_util_utf8_strstrcase (hostname, ".yahoo.com");
+		e_util_host_is_in_domain (hostname, "yahoo.com");
 }
 
 static const gchar *
@@ -134,7 +134,7 @@ static const gchar *
 eos_yahoo_get_redirect_uri (EOAuth2Service *service,
 			    ESource *source)
 {
-	return "https://wiki.gnome.org/Apps/Evolution/YahooOAuth2/";
+	return "https://gnome.pages.gitlab.gnome.org/evolution/YahooOAuth2/";
 }
 
 static void

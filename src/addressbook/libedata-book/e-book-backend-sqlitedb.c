@@ -1,4 +1,3 @@
-/*-*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /* e-book-backend-sqlitedb.c
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -5741,9 +5740,9 @@ ebsdb_cursor_new (EBookBackendSqliteDB *ebsdb,
 
 	/* Sort parameters */
 	cursor->n_sort_fields = n_sort_fields;
-	cursor->sort_fields = g_memdup (
+	cursor->sort_fields = g_memdup2 (
 		sort_fields, sizeof (EContactField) * n_sort_fields);
-	cursor->sort_types = g_memdup (
+	cursor->sort_types = g_memdup2 (
 		sort_types, sizeof (EBookCursorSortType) * n_sort_fields);
 
 	/* Cursor state */

@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /* Evolution calendar - iCalendar file backend
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -35,13 +34,6 @@
 #define EC_ERROR(_code) e_client_error_create (_code, NULL)
 #define ECC_ERROR(_code) e_cal_client_error_create (_code, NULL)
 
-typedef enum
-{
-	CAL_DAYS,
-	CAL_HOURS,
-	CAL_MINUTES
-} CalUnits;
-
 /* Private part of the ECalBackendContacts structure */
 struct _ECalBackendContactsPrivate {
 
@@ -49,7 +41,6 @@ struct _ECalBackendContactsPrivate {
 	GHashTable   *addressbooks;	/* UID -> BookRecord */
 	gboolean      addressbook_loaded;
 
-	EBookClientView *book_view;
 	GHashTable *tracked_contacts;	/* UID -> ContactRecord */
 	GRecMutex tracked_contacts_lock;
 
@@ -59,7 +50,7 @@ struct _ECalBackendContactsPrivate {
 	guint update_alarms_id;
 	gboolean alarm_enabled;
 	gint alarm_interval;
-	CalUnits alarm_units;
+	ECalIntervalUnits alarm_units;
 
 	ESourceRegistryWatcher *registry_watcher;
 };
@@ -72,8 +63,6 @@ typedef struct _BookRecord {
 	EBookClient *book_client;
 	EBookClientView *book_view;
 	GCancellable *cancellable;
-	gboolean online;
-	gulong notify_online_id;
 } BookRecord;
 
 typedef struct _ContactRecord {
@@ -175,9 +164,6 @@ book_record_unref (BookRecord *br)
 		}
 
 		g_mutex_lock (&br->lock);
-
-		if (br->notify_online_id)
-			g_signal_handler_disconnect (br->book_client, br->notify_online_id);
 
 		g_clear_object (&br->cbc);
 		g_clear_object (&br->cancellable);
@@ -347,34 +333,6 @@ source_unset_last_credentials_required_args_cb (GObject *source_object,
 }
 
 static void
-book_client_notify_online_cb (EClient *client,
-			      GParamSpec *param,
-			      BookRecord *br)
-{
-	g_return_if_fail (E_IS_BOOK_CLIENT (client));
-	g_return_if_fail (br != NULL);
-
-	if ((br->online ? 1 : 0) == (e_client_is_online (client) ? 1 : 0))
-		return;
-
-	br->online = e_client_is_online (client);
-
-	if (br->online) {
-		ECalBackendContacts *cbc;
-		ESource *source;
-
-		cbc = g_object_ref (br->cbc);
-		source = g_object_ref (e_client_get_source (client));
-
-		cal_backend_contacts_remove_book_record (cbc, source);
-		create_book_record (cbc, source);
-
-		g_clear_object (&source);
-		g_clear_object (&cbc);
-	}
-}
-
-static void
 book_client_connected_cb (GObject *source_object,
                           GAsyncResult *result,
                           gpointer user_data)
@@ -410,8 +368,6 @@ book_client_connected_cb (GObject *source_object,
 
 	source = e_client_get_source (client);
 	br->book_client = g_object_ref (E_BOOK_CLIENT (client));
-	br->online = e_client_is_online (client);
-	br->notify_online_id = g_signal_connect (client, "notify::online", G_CALLBACK (book_client_notify_online_cb), br);
 	cal_backend_contacts_insert_book_record (br->cbc, source, br);
 
 	/* Let it consume the 'br' reference */
@@ -810,8 +766,6 @@ setup_alarm (ECalBackendContacts *cbc,
 	g_return_if_fail (cbc != NULL);
 
 	if (!comp || cbc->priv->alarm_interval == -1) {
-		gchar *str;
-
 		if (cbc->priv->alarm_interval == -1) {
 			/* initial setup, hook callback for changes too */
 			cbc->priv->notifyid = g_signal_connect (cbc->priv->settings,
@@ -820,16 +774,7 @@ setup_alarm (ECalBackendContacts *cbc,
 
 		cbc->priv->alarm_enabled = g_settings_get_boolean (cbc->priv->settings, BA_CONF_ENABLED);
 		cbc->priv->alarm_interval = g_settings_get_int (cbc->priv->settings, BA_CONF_INTERVAL);
-
-		str = g_settings_get_string (cbc->priv->settings, BA_CONF_UNITS);
-		if (str && !strcmp (str, "days"))
-			cbc->priv->alarm_units = CAL_DAYS;
-		else if (str && !strcmp (str, "hours"))
-			cbc->priv->alarm_units = CAL_HOURS;
-		else
-			cbc->priv->alarm_units = CAL_MINUTES;
-
-		g_free (str);
+		cbc->priv->alarm_units = g_settings_get_enum (cbc->priv->settings, BA_CONF_UNITS);
 
 		if (cbc->priv->alarm_interval <= 0)
 			cbc->priv->alarm_interval = 1;
@@ -854,15 +799,15 @@ setup_alarm (ECalBackendContacts *cbc,
 	i_cal_duration_set_is_neg (duration, TRUE);
 
 	switch (cbc->priv->alarm_units) {
-	case CAL_MINUTES:
+	case E_CAL_INTERVAL_UNIT_MINUTES:
 		i_cal_duration_set_minutes (duration, cbc->priv->alarm_interval);
 		break;
 
-	case CAL_HOURS:
+	case E_CAL_INTERVAL_UNIT_HOURS:
 		i_cal_duration_set_hours (duration, cbc->priv->alarm_interval);
 		break;
 
-	case CAL_DAYS:
+	case E_CAL_INTERVAL_UNIT_DAYS:
 		i_cal_duration_set_days (duration, cbc->priv->alarm_interval);
 		break;
 
@@ -941,8 +886,14 @@ create_component (ECalBackendContacts *cbc,
 	rt = i_cal_recurrence_new ();
 	i_cal_recurrence_set_freq (rt, I_CAL_YEARLY_RECURRENCE);
 	i_cal_recurrence_set_interval (rt, 1);
-	if (is_leap_day)
+	if (is_leap_day) {
+		#ifdef HAVE_I_CAL_RECURRENCE_GET_BY
+		i_cal_recurrence_resize_by_array (rt, I_CAL_BY_MONTH_DAY, 1);
+		i_cal_recurrence_set_by (rt, I_CAL_BY_MONTH_DAY, 0, -1);
+		#else
 		i_cal_recurrence_set_by_month_day (rt, 0, -1);
+		#endif
+	}
 	recur_list = g_slist_prepend (NULL, rt);
 	e_cal_component_set_rrules (cal_comp, recur_list);
 	g_slist_free_full (recur_list, g_object_unref);
@@ -1392,7 +1343,7 @@ e_cal_backend_contacts_init (ECalBackendContacts *cbc)
 	cbc->priv->update_alarms_id = 0;
 	cbc->priv->alarm_enabled = FALSE;
 	cbc->priv->alarm_interval = -1;
-	cbc->priv->alarm_units = CAL_MINUTES;
+	cbc->priv->alarm_units = E_CAL_INTERVAL_UNIT_MINUTES;
 
 	g_signal_connect (
 		cbc, "notify::online",

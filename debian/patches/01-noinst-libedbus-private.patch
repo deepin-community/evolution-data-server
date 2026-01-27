@@ -32,15 +32,15 @@ Signed-off-by: Emilio Pozuelo Monfort <pochu@debian.org>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/private/CMakeLists.txt b/src/private/CMakeLists.txt
-index c2de59b..f568acf 100644
+index 5e4fdbb..532e76a 100644
 --- a/src/private/CMakeLists.txt
 +++ b/src/private/CMakeLists.txt
-@@ -173,7 +173,7 @@ gdbus_codegen_custom(org.gnome.evolution.dataserver.Subprocess.Backend.xml
+@@ -196,7 +196,7 @@ gdbus_codegen_custom(org.gnome.evolution.dataserver.Subprocess.Backend.xml
  	GENERATED_DBUS_SUBPROCESS_BACKEND
  	--c-generate-object-manager)
  
 -add_library(edbus-private SHARED
 +add_library(edbus-private STATIC
+ 	${GENERATED_DBUS_IDENTITY_BROKER}
  	${GENERATED_DBUS_LOCALE}
  	${GENERATED_DBUS_SOURCE}
- 	${GENERATED_DBUS_SOURCE_MANAGER}

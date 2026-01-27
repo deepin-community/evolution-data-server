@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -445,9 +444,6 @@ init_sqlite_vfs (void)
 	vfs.xOpen = camel_sqlite3_vfs_xOpen;
 
 	sqlite3_vfs_register (&vfs, 1);
-
-	if (g_getenv ("CAMEL_SQLITE_SHARED_CACHE"))
-		sqlite3_enable_shared_cache (TRUE);
 
 	return NULL;
 }

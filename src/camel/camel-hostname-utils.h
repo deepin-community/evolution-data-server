@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 2021 Red Hat (www.redhat.com)
  *
@@ -27,6 +26,8 @@
 G_BEGIN_DECLS
 
 gboolean	camel_hostname_utils_requires_ascii	(const gchar *hostname);
+gboolean	camel_hostname_utils_host_is_in_domain	(const gchar *host,
+							 const gchar *domain);
 
 G_END_DECLS
 

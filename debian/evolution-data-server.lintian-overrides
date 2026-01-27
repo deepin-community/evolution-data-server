@@ -1,2 +1,5 @@
 # camel-lock-helper-1.2 must have access to the mail lock files
 evolution-data-server: elevated-privileges 2755 root/mail [usr/libexec/camel-lock-helper-1.2]
+# False positive after enabling LTO
+# https://salsa.debian.org/lintian/lintian/-/merge_requests/638
+evolution-data-server: library-not-linked-against-libc [usr/lib/evolution-data-server/registry-modules/module-cache-reaper.so]

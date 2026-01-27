@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -1243,7 +1242,7 @@ e_book_backend_summary_search (EBookBackendSummary *summary,
 	ESExp *sexp;
 	ESExpResult *r;
 	GPtrArray *retval;
-	gint i;
+	guint i;
 	gint esexp_error;
 
 	g_return_val_if_fail (summary != NULL, NULL);
@@ -1274,7 +1273,6 @@ e_book_backend_summary_search (EBookBackendSummary *summary,
 
 	if (r && r->type == ESEXP_RES_ARRAY_PTR && r->value.ptrarray) {
 		GPtrArray *ptrarray = r->value.ptrarray;
-		gint i;
 
 		for (i = 0; i < ptrarray->len; i++)
 			g_ptr_array_add (retval, g_ptr_array_index (ptrarray, i));

@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -1651,7 +1650,7 @@ header_encode_string_rfc2047 (const guchar *in,
 	start = inptr;
 	while (inptr && *inptr) {
 		gunichar c;
-		const gchar *newinptr;
+		const guchar *newinptr;
 
 		newinptr = g_utf8_next_char (inptr);
 		c = g_utf8_get_char ((gchar *) inptr);
@@ -1734,7 +1733,7 @@ header_encode_string_rfc2047 (const guchar *in,
 		if (!(c < 256 && !include_lwsp && camel_mime_is_lwsp (c)) && !word)
 			word = inptr;
 
-		inptr = (const guchar *) newinptr;
+		inptr = newinptr;
 	}
 
 	if (inptr - start) {
@@ -1875,7 +1874,7 @@ header_encode_phrase_get_words (const guchar *in,
 	encoding = 0;
 	while (inptr && *inptr) {
 		gunichar c;
-		const gchar *newinptr;
+		const guchar *newinptr;
 
 		newinptr = g_utf8_next_char (inptr);
 		c = g_utf8_get_char ((gchar *) inptr);
@@ -1889,7 +1888,7 @@ header_encode_phrase_get_words (const guchar *in,
 			continue;
 		}
 
-		inptr = (const guchar *) newinptr;
+		inptr = newinptr;
 		if (g_unichar_isspace (c)) {
 			if (count > 0) {
 				word = g_new0 (struct _phrase_word, 1);
@@ -3829,7 +3828,6 @@ camel_content_type_decode (const gchar *in)
 		g_free (type);
 		g_free (subtype);
 	} else {
-		g_free (type);
 		d (printf ("cannot find MIME type in header (2) '%s'", in));
 	}
 	return t;
@@ -4014,6 +4012,12 @@ camel_content_disposition_is_attachment_ex (const CamelContentDisposition *dispo
 		return !parent_content_type || !camel_content_type_is (parent_content_type, "multipart", "signed");
 
 	if (parent_content_type && content_type && camel_content_type_is (content_type, "message", "rfc822"))
+		return TRUE;
+
+	if (parent_content_type && content_type && !disposition &&
+	    camel_content_type_is (parent_content_type, "multipart", "mixed") && (
+	    camel_content_type_param ((CamelContentType *) content_type, "name") ||
+	    camel_content_type_param ((CamelContentType *) content_type, "filename")))
 		return TRUE;
 
 	if (!disposition)
@@ -4550,9 +4554,9 @@ parse_broken_date (struct _date_token *tokens,
 		}
 
 		if (is_tzone (token) && !got_tzone) {
-			struct _date_token *t = token;
+			struct _date_token *dt = token;
 
-			if ((n = get_tzone (&t)) != -1) {
+			if ((n = get_tzone (&dt)) != -1) {
 				d (printf ("tzone; "));
 				got_tzone = TRUE;
 				offset = n;
@@ -5267,7 +5271,7 @@ camel_header_address_fold (const gchar *in,
 			/* strip trailing space */
 			if (out->len > 0 && out->str[out->len - 1] == ' ')
 				g_string_truncate (out, out->len - 1);
-			g_string_append (out, "\n\t");
+			g_string_append (out, "\n ");
 			outlen = 1;
 		}
 
@@ -5282,6 +5286,21 @@ camel_header_address_fold (const gchar *in,
 		g_free ((gchar *) in);
 
 	return g_string_free (out, FALSE);
+}
+
+static gboolean
+ends_only_with_spcs (GString *str)
+{
+	guint ii;
+
+	for (ii = 0; ii < str->len; ii++) {
+		gchar chr = str->str[str->len - ii - 1];
+
+		if (chr != ' ' && chr != '\t')
+			return chr == '\n';
+	}
+
+	return FALSE;
 }
 
 /* simple header folding */
@@ -5340,7 +5359,8 @@ camel_header_fold (const gchar *in,
 		if (outlen + len > CAMEL_FOLD_SIZE) {
 			d (printf ("outlen = %d wordlen = %d\n", outlen, len));
 			/* strip trailing space */
-			if (out->len > 0 && (out->str[out->len - 1] == ' ' || out->str[out->len - 1] == '\t')) {
+			if (out->len > 0 && outlen > 2 && (out->str[out->len - 1] == ' ' || out->str[out->len - 1] == '\t') &&
+			    !ends_only_with_spcs (out)) {
 				spc = out->str[out->len - 1];
 				g_string_truncate (out, out->len - 1);
 				g_string_append_c (out, '\n');
@@ -5352,10 +5372,15 @@ camel_header_fold (const gchar *in,
 			while (outlen + len > CAMEL_FOLD_MAX_SIZE) {
 				tmplen = CAMEL_FOLD_MAX_SIZE - outlen;
 				g_string_append_len (out, inptr, tmplen);
-				g_string_append (out, "\n\t");
 				inptr += tmplen;
 				len -= tmplen;
-				outlen = 1;
+				if (*inptr == ' ' || *inptr == '\t') {
+					g_string_append_c (out, '\n');
+					outlen = 0;
+				} else {
+					g_string_append (out, "\n ");
+					outlen = 1;
+				}
 			}
 		}
 
@@ -5384,10 +5409,8 @@ camel_header_unfold (const gchar *in)
 	while ((c = *inptr++)) {
 		if (c == '\n') {
 			if (camel_mime_is_lwsp (*inptr)) {
-				do {
-					inptr++;
-				} while (camel_mime_is_lwsp (*inptr));
-				*o++ = ' ';
+				*o++ = *inptr;
+				inptr++;
 			} else {
 				*o++ = c;
 			}

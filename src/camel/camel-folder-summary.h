@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -270,6 +269,10 @@ CamelMessageInfo *
 		camel_message_info_new_from_headers
 						(CamelFolderSummary *summary,
 						 const CamelNameValueArray *headers);
+CamelMessageInfo *
+		camel_message_info_new_from_message
+						(CamelFolderSummary *summary,
+						 CamelMimeMessage *message);
 G_END_DECLS
 
 #endif /* CAMEL_FOLDER_SUMMARY_H */

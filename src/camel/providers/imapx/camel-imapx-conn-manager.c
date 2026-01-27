@@ -1,4 +1,3 @@
-/*-*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /* camel-imap-conn-manager.h
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -1115,7 +1114,7 @@ camel_imapx_conn_manager_run_job_sync (CamelIMAPXConnManager *conn_man,
 				       GCancellable *cancellable,
 				       GError **error)
 {
-	GSList *link;
+	GSList *slink;
 	ConnectionInfo *cinfo;
 	gboolean success = FALSE, is_new_connection = FALSE;
 	GError *local_error = NULL;
@@ -1130,16 +1129,16 @@ camel_imapx_conn_manager_run_job_sync (CamelIMAPXConnManager *conn_man,
 		return FALSE;
 	}
 
-	link = conn_man->priv->job_queue;
-	while (link) {
-		CamelIMAPXJob *queued_job = link->data;
+	slink = conn_man->priv->job_queue;
+	while (slink) {
+		CamelIMAPXJob *queued_job = slink->data;
 		gboolean matches;
 
 		g_warn_if_fail (queued_job != NULL);
 		g_warn_if_fail (queued_job != job);
 
 		if (!queued_job) {
-			link = g_slist_next (link);
+			slink = g_slist_next (slink);
 			continue;
 		}
 
@@ -1179,9 +1178,9 @@ camel_imapx_conn_manager_run_job_sync (CamelIMAPXConnManager *conn_man,
 			camel_imapx_job_unref (queued_job);
 
 			/* The queue could change, start from the beginning. */
-			link = conn_man->priv->job_queue;
+			slink = conn_man->priv->job_queue;
 		} else {
-			link = g_slist_next (link);
+			slink = g_slist_next (slink);
 		}
 	}
 
@@ -1212,7 +1211,7 @@ camel_imapx_conn_manager_run_job_sync (CamelIMAPXConnManager *conn_man,
 			success = camel_imapx_server_stop_idle_sync (cinfo->is, cancellable, &local_error);
 
 			if (success && camel_imapx_server_can_use_idle (cinfo->is)) {
-				GList *link, *connection_infos, *disconnected_infos = NULL;
+				GList *llink, *connection_infos, *disconnected_infos = NULL;
 
 				CON_READ_LOCK (conn_man);
 				connection_infos = g_list_copy (conn_man->priv->connections);
@@ -1221,8 +1220,8 @@ camel_imapx_conn_manager_run_job_sync (CamelIMAPXConnManager *conn_man,
 
 				/* Stop IDLE on all connections serving the same mailbox,
 				   to avoid notifications for changes done by itself */
-				for (link = connection_infos; link && !g_cancellable_is_cancelled (cancellable); link = g_list_next (link)) {
-					ConnectionInfo *other_cinfo = link->data;
+				for (llink = connection_infos; llink && !g_cancellable_is_cancelled (cancellable); llink = g_list_next (llink)) {
+					ConnectionInfo *other_cinfo = llink->data;
 					CamelIMAPXMailbox *other_mailbox;
 
 					if (!other_cinfo || other_cinfo == cinfo || connection_info_get_busy (other_cinfo) ||
@@ -1249,8 +1248,8 @@ camel_imapx_conn_manager_run_job_sync (CamelIMAPXConnManager *conn_man,
 					g_clear_object (&other_mailbox);
 				}
 
-				for (link = disconnected_infos; link; link = g_list_next (link)) {
-					ConnectionInfo *other_cinfo = link->data;
+				for (llink = disconnected_infos; llink; llink = g_list_next (llink)) {
+					ConnectionInfo *other_cinfo = llink->data;
 
 					imapx_conn_manager_remove_info (conn_man, other_cinfo);
 				}
@@ -1752,11 +1751,11 @@ imapx_conn_manager_move_to_real_trash_sync (CamelIMAPXConnManager *conn_man,
 }
 
 static gboolean
-imapx_conn_manager_move_to_inbox_sync (CamelIMAPXConnManager *conn_man,
-				       CamelFolder *folder,
-				       GCancellable *cancellable,
-				       gboolean *out_need_to_expunge,
-				       GError **error)
+imapx_conn_manager_move_to_not_junk_sync (CamelIMAPXConnManager *conn_man,
+					  CamelFolder *folder,
+					  GCancellable *cancellable,
+					  gboolean *out_need_to_expunge,
+					  GError **error)
 {
 	CamelIMAPXFolder *imapx_folder;
 	CamelIMAPXMailbox *mailbox;
@@ -1773,19 +1772,35 @@ imapx_conn_manager_move_to_inbox_sync (CamelIMAPXConnManager *conn_man,
 
 	uids_to_copy = g_ptr_array_new_with_free_func ((GDestroyNotify) camel_pstring_free);
 
-	camel_imapx_folder_claim_move_to_inbox_uids (CAMEL_IMAPX_FOLDER (folder), uids_to_copy);
+	camel_imapx_folder_claim_move_to_not_junk_uids (CAMEL_IMAPX_FOLDER (folder), uids_to_copy);
 
 	if (uids_to_copy->len > 0) {
+		CamelFolder *dest_folder = NULL;
 		CamelIMAPXStore *imapx_store;
 		CamelIMAPXMailbox *destination = NULL;
+		CamelIMAPXSettings *settings;
 
 		imapx_store = camel_imapx_conn_manager_ref_store (conn_man);
+		settings = CAMEL_IMAPX_SETTINGS (camel_service_ref_settings (CAMEL_SERVICE (imapx_store)));
+		if (camel_imapx_settings_get_use_real_not_junk_path (settings)) {
+			gchar *real_not_junk_path;
 
-		folder = camel_store_get_inbox_folder_sync (CAMEL_STORE (imapx_store), cancellable, error);
+			real_not_junk_path = camel_imapx_settings_dup_real_not_junk_path (settings);
+			if (real_not_junk_path && *real_not_junk_path) {
+				dest_folder = camel_store_get_folder_sync (CAMEL_STORE (imapx_store),
+					real_not_junk_path, 0, cancellable, NULL);
+			}
+			g_free (real_not_junk_path);
+		}
+		g_clear_object (&settings);
 
-		if (folder != NULL) {
-			destination = camel_imapx_folder_list_mailbox (CAMEL_IMAPX_FOLDER (folder), cancellable, error);
-			g_object_unref (folder);
+		/* fallback to Inbox */
+		if (!dest_folder)
+			dest_folder = camel_store_get_inbox_folder_sync (CAMEL_STORE (imapx_store), cancellable, error);
+
+		if (dest_folder) {
+			destination = camel_imapx_folder_list_mailbox (CAMEL_IMAPX_FOLDER (dest_folder), cancellable, error);
+			g_clear_object (&dest_folder);
 		}
 
 		/* Avoid duplicating messages in the Inbox folder. */
@@ -1806,7 +1821,7 @@ imapx_conn_manager_move_to_inbox_sync (CamelIMAPXConnManager *conn_man,
 		if (!success) {
 			g_prefix_error (
 				error, "%s: ",
-				_("Unable to move messages to Inbox"));
+				_("Unable to move Not-Junk messages"));
 		}
 
 		g_clear_object (&imapx_store);
@@ -1930,7 +1945,7 @@ camel_imapx_conn_manager_sync_changes_sync (CamelIMAPXConnManager *conn_man,
 	}
 
 	if (success) {
-		success = imapx_conn_manager_move_to_inbox_sync (
+		success = imapx_conn_manager_move_to_not_junk_sync (
 			conn_man, folder, cancellable,
 			&need_to_expunge, error);
 		expunge |= need_to_expunge;

@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -489,7 +488,8 @@ struct {
 	{ "X-GM-EXT-1", IMAPX_CAPABILITY_X_GM_EXT_1 },
 	{ "UTF8=ACCEPT", IMAPX_CAPABILITY_UTF8_ACCEPT },
 	{ "UTF8=ONLY", IMAPX_CAPABILITY_UTF8_ONLY },
-	{ "LOGINDISABLED", IMAPX_CAPABILITY_LOGINDISABLED }
+	{ "LOGINDISABLED", IMAPX_CAPABILITY_LOGINDISABLED },
+	{ "PREVIEW", IMAPX_CAPABILITY_PREVIEW }
 };
 
 static GMutex capa_htable_lock;         /* capabilities lookup table lock */
@@ -1787,6 +1787,8 @@ imapx_free_fetch (struct _fetch_info *finfo)
 		g_bytes_unref (finfo->text);
 	if (finfo->header)
 		g_bytes_unref (finfo->header);
+	if (finfo->preview)
+		g_bytes_unref (finfo->preview);
 	if (finfo->cinfo)
 		camel_message_content_info_free (finfo->cinfo);
 	camel_named_flags_free (finfo->user_flags);
@@ -2012,6 +2014,33 @@ imapx_parse_fetch_modseq (CamelIMAPXInputStream *stream,
 }
 
 static gboolean
+imapx_parse_fetch_preview (CamelIMAPXInputStream *stream,
+			   struct _fetch_info *finfo,
+			   GCancellable *cancellable,
+			   GError **error)
+{
+	gboolean success;
+	GError *local_error = NULL;
+
+	success = camel_imapx_input_stream_nstring_bytes (stream, &finfo->preview, FALSE, cancellable, &local_error);
+
+	/* the preview can be NIL */
+	if (success && finfo->preview)
+		finfo->got |= FETCH_PREVIEW;
+
+	if (!success) {
+		if (g_error_matches (local_error, CAMEL_IMAPX_ERROR, CAMEL_IMAPX_ERROR_SERVER_RESPONSE_MALFORMED))
+			g_set_error_literal (error, CAMEL_IMAPX_ERROR, CAMEL_IMAPX_ERROR_PREVIEW_BROKEN, local_error->message);
+		else if (local_error)
+			g_propagate_error (error, g_steal_pointer (&local_error));
+	}
+
+	g_clear_error (&local_error);
+
+	return success;
+}
+
+static gboolean
 imapx_parse_fetch_rfc822_header (CamelIMAPXInputStream *stream,
                                  struct _fetch_info *finfo,
                                  GCancellable *cancellable,
@@ -2169,6 +2198,11 @@ imapx_parse_fetch (CamelIMAPXInputStream *stream,
 
 			case IMAPX_MODSEQ:
 				success = imapx_parse_fetch_modseq (
+					stream, finfo, cancellable, error);
+				break;
+
+			case IMAPX_PREVIEW:
+				success = imapx_parse_fetch_preview (
 					stream, finfo, cancellable, error);
 				break;
 
@@ -2598,8 +2632,6 @@ imapx_parse_status (CamelIMAPXInputStream *stream,
 		goto fail;
 
 	if (tok == '[') {
-		gboolean success;
-
 		success = camel_imapx_input_stream_atom (
 			stream, &token, &len, cancellable, error);
 
@@ -3363,6 +3395,7 @@ imapx_verify_tokens_tab (void)
 		item (IMAPX_PARSE),
 		item (IMAPX_PERMANENTFLAGS),
 		item (IMAPX_PREAUTH),
+		item (IMAPX_PREVIEW),
 		{ IMAPX_READ_ONLY, "READ-ONLY" },
 		{ IMAPX_READ_WRITE, "READ-WRITE" },
 		item (IMAPX_RECENT),
@@ -3612,7 +3645,7 @@ imapx_splice_with_progress (GOutputStream *output_stream,
 	g_return_val_if_fail (G_IS_INPUT_STREAM (input_stream), -1);
 
 	if (g_cancellable_set_error_if_cancelled (cancellable, error))
-		return FALSE;
+		return -1;
 
 	file_offset = 0;
 	bytes_copied = 0;

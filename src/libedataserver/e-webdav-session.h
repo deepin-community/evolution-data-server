@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 2017 Red Hat, Inc. (www.redhat.com)
  *
@@ -89,7 +88,9 @@ typedef enum {
 	E_WEBDAV_RESOURCE_KIND_COLLECTION,
 	E_WEBDAV_RESOURCE_KIND_RESOURCE,
 	E_WEBDAV_RESOURCE_KIND_SUBSCRIBED_ICALENDAR,
-	E_WEBDAV_RESOURCE_KIND_WEBDAV_NOTES
+	E_WEBDAV_RESOURCE_KIND_WEBDAV_NOTES,
+	E_WEBDAV_RESOURCE_KIND_SCHEDULE_INBOX,
+	E_WEBDAV_RESOURCE_KIND_SCHEDULE_OUTBOX
 } EWebDAVResourceKind;
 
 typedef enum {

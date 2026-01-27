@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -188,7 +187,7 @@ static gchar *states[] = {
 	"CAMEL_MIME_PARSER_STATE_EOF",		/* end of file */
 	"CAMEL_MIME_PARSER_STATE_PRE_FROM_END",
 	"CAMEL_MIME_PARSER_STATE_FROM_END",
-	"CAMEL_MIME_PARSER_STATE_HEAER_END",
+	"CAMEL_MIME_PARSER_STATE_HEADER_END",
 	"CAMEL_MIME_PARSER_STATE_BODY_END",
 	"CAMEL_MIME_PARSER_STATE_MULTIPART_END",
 	"CAMEL_MIME_PARSER_STATE_MESSAGE_END",
@@ -1863,6 +1862,10 @@ tail_recurse:
 						databuffer, datalength, &presize);
 					d (fwrite (*databuffer, sizeof (gchar), *datalength, stdout));
 					d (printf ("'\n"));
+					if (camel_mime_filter_get_request_stop (f->filter)) {
+						*datalength = 0;
+						break;
+					}
 					f = f->next;
 				}
 				return;

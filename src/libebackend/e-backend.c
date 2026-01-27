@@ -535,12 +535,19 @@ backend_source_authenticate_thread (gpointer user_data)
 static void
 backend_source_authenticate_cb (ESource *source,
 				const ENamedParameters *credentials,
-				EBackend *backend)
+				gpointer user_data)
 {
-	g_return_if_fail (E_IS_BACKEND (backend));
+	GWeakRef *weak_ref = user_data;
+	EBackend *backend;
+
+	g_return_if_fail (weak_ref != NULL);
 	g_return_if_fail (credentials != NULL);
 
-	e_backend_schedule_authenticate	(backend, credentials);
+	backend = g_weak_ref_get (weak_ref);
+	if (backend) {
+		e_backend_schedule_authenticate	(backend, credentials);
+		g_object_unref (backend);
+	}
 }
 
 static void
@@ -552,7 +559,9 @@ backend_set_source (EBackend *backend,
 
 	backend->priv->source = g_object_ref (source);
 
-	g_signal_connect (backend->priv->source, "authenticate", G_CALLBACK (backend_source_authenticate_cb), backend);
+	g_signal_connect_data (backend->priv->source, "authenticate",
+		G_CALLBACK (backend_source_authenticate_cb), e_weak_ref_new (backend),
+		(GClosureNotify) e_weak_ref_free, 0);
 }
 
 static void
@@ -692,11 +701,17 @@ backend_constructed (GObject *object)
 	EBackend *backend;
 	ESource *source;
 	const gchar *extension_name;
+	gulong handler_id;
 
 	backend = E_BACKEND (object);
 
 	/* Chain up to parent's constructed() method. */
 	G_OBJECT_CLASS (e_backend_parent_class)->constructed (object);
+
+	handler_id = g_signal_connect (
+		backend->priv->network_monitor, "network-changed",
+		G_CALLBACK (backend_network_changed_cb), backend);
+	backend->priv->network_changed_handler_id = handler_id;
 
 	/* Get an initial GSocketConnectable from the data
 	 * source's [Authentication] extension, if present. */
@@ -845,7 +860,6 @@ static void
 e_backend_init (EBackend *backend)
 {
 	GNetworkMonitor *network_monitor;
-	gulong handler_id;
 
 	backend->priv = e_backend_get_instance_private (backend);
 	backend->priv->prompter = e_user_prompter_new ();
@@ -865,11 +879,6 @@ e_backend_init (EBackend *backend)
 	network_monitor = e_network_monitor_get_default ();
 	backend->priv->network_monitor = g_object_ref (network_monitor);
 	backend->priv->online = g_network_monitor_get_network_available (network_monitor);
-
-	handler_id = g_signal_connect (
-		backend->priv->network_monitor, "network-changed",
-		G_CALLBACK (backend_network_changed_cb), backend);
-	backend->priv->network_changed_handler_id = handler_id;
 }
 
 /**

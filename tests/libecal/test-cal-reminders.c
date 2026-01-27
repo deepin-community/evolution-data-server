@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 2019 Red Hat (www.redhat.com)
  *
@@ -93,6 +92,7 @@ test_reminders_verify (const gchar *comp_str,
 
 	if (!alarms) {
 		g_assert_cmpint (n_expected_instances, ==, 0);
+		g_assert_false (e_cal_util_has_alarms_in_range (ecomp, start, end, omit, resolve_tzid, NULL, default_zone));
 	} else {
 		GHashTable *used_indexes; /* GUINT_TO_POINTER(index) ~> NULL */
 		GSList *received_instances, *link;
@@ -132,6 +132,7 @@ test_reminders_verify (const gchar *comp_str,
 		}
 
 		g_assert_cmpint (n_expected_instances, ==, g_hash_table_size (used_indexes));
+		g_assert_true (e_cal_util_has_alarms_in_range (ecomp, start, end, omit, resolve_tzid, NULL, default_zone));
 
 		g_hash_table_destroy (used_indexes);
 	}

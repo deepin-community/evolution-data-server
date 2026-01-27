@@ -4,6 +4,7 @@
 
 set(autostartdir ${SYSCONF_INSTALL_DIR}/xdg/autostart)
 set(desktopdir ${SHARE_INSTALL_PREFIX}/applications)
+set(alarm_notify_icon hicolor_apps_scalable_org.gnome.Evolution-alarm-notify.svg)
 
 configure_file(org.gnome.Evolution-alarm-notify.desktop.in.in
 	org.gnome.Evolution-alarm-notify.desktop.in
@@ -18,6 +19,47 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.gnome.Evolution-alarm-notify.deskt
 
 # To have GNOME Shell show the GNotification notifications from it; otherwise it ignores them
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.gnome.Evolution-alarm-notify.desktop
+	DESTINATION ${desktopdir}
+)
+
+add_icon_cache_files("${SHARE_INSTALL_PREFIX}" alarm_notify_icon)
+
+# ********************************
+# OAuth2 Handler helper
+# ********************************
+
+set(OAUTH2_SCHEMES "x-scheme-handler/eds-oauth2;")
+if(NOT WITH_GOOGLE_CLIENT_ID STREQUAL "")
+	set(CMAKE_REQUIRED_DEFINITIONS ${DATA_SERVER_CFLAGS})
+	set(CMAKE_REQUIRED_INCLUDES ${CMAKE_BINARY_DIR} ${DATA_SERVER_INCLUDE_DIRS})
+	set(CMAKE_REQUIRED_LIBRARIES ${DATA_SERVER_LDFLAGS})
+	list(APPEND CMAKE_REQUIRED_DEFINITIONS -DG_LOG_DOMAIN=\"oauth2-value-helper\" -DBUILDING_VALUE_HELPER=1)
+	file(TO_NATIVE_PATH "${CMAKE_BINARY_DIR}/oauth2-google-client-id" _binary_dir_to_file)
+	CHECK_C_SOURCE_RUNS("#define DECODE_KEY \"${WITH_GOOGLE_CLIENT_ID}\"
+			     #define DECODE_TO_FILE \"${_binary_dir_to_file}\"
+			     #define DECODE_REVERSED 1
+			     #include \"${CMAKE_SOURCE_DIR}/src/libedataserver/e-oauth2-service.c\"" _decoded)
+	file(READ ${_binary_dir_to_file} _google_oauth2_scheme)
+	unset(_binary_dir_to_file)
+	unset(_decoded)
+	unset(CMAKE_REQUIRED_LIBRARIES)
+	unset(CMAKE_REQUIRED_INCLUDES)
+	unset(CMAKE_REQUIRED_DEFINITIONS)
+
+	if(NOT _google_oauth2_scheme STREQUAL "")
+		set(OAUTH2_SCHEMES "x-scheme-handler/${_google_oauth2_scheme};${OAUTH2_SCHEMES}")
+	endif(NOT _google_oauth2_scheme STREQUAL "")
+	unset(_google_oauth2_scheme)
+endif(NOT WITH_GOOGLE_CLIENT_ID STREQUAL "")
+
+configure_file(org.gnome.evolution-data-server.OAuth2-handler.desktop.in
+	org.gnome.evolution-data-server.OAuth2-handler.desktop.in
+	@ONLY
+)
+
+i18n_merge_file(${CMAKE_CURRENT_BINARY_DIR}/org.gnome.evolution-data-server.OAuth2-handler.desktop.in org.gnome.evolution-data-server.OAuth2-handler.desktop ${CMAKE_SOURCE_DIR}/po)
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.gnome.evolution-data-server.OAuth2-handler.desktop
 	DESTINATION ${desktopdir}
 )
 
@@ -47,6 +89,7 @@ add_custom_command(OUTPUT gschemas.compiled
 add_custom_target(data-files ALL
 	DEPENDS gschemas.compiled
 		org.gnome.Evolution-alarm-notify.desktop
+		org.gnome.evolution-data-server.OAuth2-handler.desktop
 )
 
 add_gsettings_schemas(data-files ${BUILT_SCHEMAS})

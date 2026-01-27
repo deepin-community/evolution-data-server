@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -121,6 +120,12 @@ void		camel_mime_filter_backup	(CamelMimeFilter *filter,
 void		camel_mime_filter_set_size	(CamelMimeFilter *filter,
 						 gsize size,
 						 gint keep);
+
+void		camel_mime_filter_set_request_stop
+						(CamelMimeFilter *filter,
+						 gboolean request_stop);
+gboolean	camel_mime_filter_get_request_stop
+						(CamelMimeFilter *filter);
 
 G_END_DECLS
 

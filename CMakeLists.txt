@@ -1,17 +1,17 @@
 # Evolution-Data-Server build script
 
-cmake_minimum_required(VERSION 3.1)
-cmake_policy(VERSION 3.1)
+cmake_minimum_required(VERSION 3.15)
+cmake_policy(VERSION 3.15)
 
 project(evolution-data-server
-	VERSION 3.50.1
+	VERSION 3.56.2
 	LANGUAGES C CXX)
 set(PROJECT_BUGREPORT "https://gitlab.gnome.org/GNOME/evolution-data-server/issues/")
 
 # Base Version: This is for API/version tracking for things like
 # D-Bus server files. This should always be the major/minor of
 # the stable version or stable version to be.
-set(BASE_VERSION 3.50)
+set(BASE_VERSION 3.56)
 
 # This number is meaningless, but we're now stuck with it in our
 # library names for backward compatibility.
@@ -43,6 +43,7 @@ set(ADDRESS_BOOK_DBUS_SERVICE_NAME	"org.gnome.evolution.dataserver.AddressBook10
 set(CALENDAR_DBUS_SERVICE_NAME		"org.gnome.evolution.dataserver.Calendar8")
 set(SOURCES_DBUS_SERVICE_NAME		"org.gnome.evolution.dataserver.Sources5")
 set(USER_PROMPTER_DBUS_SERVICE_NAME	"org.gnome.evolution.dataserver.UserPrompter0")
+set(OAUTH2_RESPONSE_DBUS_SERVICE_NAME	"org.gnome.evolution.dataserver.OAuth2Response0")
 
 # ******************************
 # Library versioning
@@ -80,7 +81,7 @@ set(LIBEDATABOOK_CURRENT 27)
 set(LIBEDATABOOK_REVISION 0)
 set(LIBEDATABOOK_AGE 0)
 
-set(LIBECAL_CURRENT 2)
+set(LIBECAL_CURRENT 3)
 set(LIBECAL_REVISION 0)
 set(LIBECAL_AGE 0)
 
@@ -119,12 +120,11 @@ set(libical_glib_minimum_version 3.0.7)
 set(libsecret_minimum_version 0.5)
 set(libxml_minimum_version 2.0.0)
 set(sqlite_minimum_version 3.7.17)
+set(uuid_minimum_version 2.0)
 
 # Optional Packages
 set(goa_minimum_version 3.8)
 set(gweather_minimum_version 3.91)
-set(libaccounts_glib_minimum_version 1.4)
-set(libsignon_glib_minimum_version 1.8)
 set(json_glib_minimum_version 1.0.4)
 set(webkit2gtk_minimum_version 2.34.0)
 set(webkit2gtk4_minimum_version 2.36.0)
@@ -189,6 +189,7 @@ if(NOT ("${DBUS_SERVICES_PREFIX}" STREQUAL ""))
 	set(CALENDAR_DBUS_SERVICE_NAME		"${DBUS_SERVICES_PREFIX}.${CALENDAR_DBUS_SERVICE_NAME}")
 	set(SOURCES_DBUS_SERVICE_NAME		"${DBUS_SERVICES_PREFIX}.${SOURCES_DBUS_SERVICE_NAME}")
 	set(USER_PROMPTER_DBUS_SERVICE_NAME	"${DBUS_SERVICES_PREFIX}.${USER_PROMPTER_DBUS_SERVICE_NAME}")
+	set(OAUTH2_RESPONSE_DBUS_SERVICE_NAME	"${DBUS_SERVICES_PREFIX}.${OAUTH2_RESPONSE_DBUS_SERVICE_NAME}")
 else(NOT ("${DBUS_SERVICES_PREFIX}" STREQUAL ""))
 	unset(DBUS_SERVICES_PREFIX)
 endif(NOT ("${DBUS_SERVICES_PREFIX}" STREQUAL ""))
@@ -313,6 +314,7 @@ setup_build_flags(${ENABLE_MAINTAINER_MODE})
 
 CHECK_INCLUDE_FILE(com_err.h HAVE_COM_ERR_H)
 CHECK_INCLUDE_FILE(et/com_err.h HAVE_ET_COM_ERR_H)
+CHECK_INCLUDE_FILE(sys/param.h HAVE_SYS_PARAM_H)
 CHECK_INCLUDE_FILE(sys/wait.h HAVE_SYS_WAIT_H)
 CHECK_INCLUDE_FILE(wspiapi.h HAVE_WSPIAPI_H)
 CHECK_INCLUDE_FILE(zlib.h HAVE_ZLIB_H)
@@ -374,13 +376,13 @@ endif(WIN32)
 # ICU started shipping pkg-config files but it's not present
 # on many systems, if we don't find the pkg-config
 # file then let's fallback on a manual check
-pkg_check_modules(ICU icu-i18n)
+pkg_check_modules(ICU icu-i18n icu-uc)
 
 if(NOT ICU_FOUND)
 	CHECK_INCLUDE_FILE(unicode/ucol.h HAVE_UNICODE_UCOL_H)
 	if(NOT HAVE_UNICODE_UCOL_H)
 		message(FATAL_ERROR "ICU unicode/ucol.h not found; icu-i18n is required")
-	endif(HAVE_UNICODE_UCOL_H)
+	endif(NOT HAVE_UNICODE_UCOL_H)
 
 	set(CMAKE_REQUIRED_LIBRARIES "-licui18n -licuuc -licudata")
 	CHECK_C_SOURCE_COMPILES("#include <unicode/ucol.h>
@@ -391,7 +393,7 @@ if(NOT ICU_FOUND)
 		set(ICU_CFLAGS -D_REENTRANT)
 		set(ICU_LIBS "-licui18n -licuuc -licudata")
 	else(HAVE_UCOL_OPEN)
-		message(FATAL_ERROR "Failed to find icu-i18n, install its development files or build them first")
+		message(FATAL_ERROR "Failed to find icui18n, icuuc and icudata, install its development files or build them first")
 	endif(HAVE_UCOL_OPEN)
 endif(NOT ICU_FOUND)
 
@@ -419,6 +421,7 @@ endif(ENABLE_GTK4)
 # **************************************************************
 
 pkg_check_modules(JSON_GLIB REQUIRED json-glib-1.0>=${json_glib_minimum_version})
+pkg_check_modules(UUID REQUIRED uuid>=${uuid_minimum_version})
 
 if(ENABLE_GTK)
 	add_printable_option(ENABLE_OAUTH2_WEBKITGTK "Enable WebKitGTK gtk3 for built-in OAuth2 authentications" ON)
@@ -532,11 +535,11 @@ if(WITH_LIBDB)
 		endif(("${WITH_LIBDB_CFLAGS}" STREQUAL "") AND ("${WITH_LIBDB_LIBS}" STREQUAL ""))
 	endif(NOT (WITH_LIBDB OR ("${WITH_LIBDB}" STREQUAL "YES")))
 
-	set(CMAKE_REQUIRED_FLAGS ${LIBDB_CFLAGS})
+	set(CMAKE_REQUIRED_DEFINITIONS ${LIBDB_CFLAGS})
 	set(CMAKE_REQUIRED_LIBRARIES ${LIBDB_LIBS})
 	CHECK_C_SOURCE_COMPILES("#include <db.h>
 				int main(void) { db_create(NULL, NULL, 0); return 0; }" HAVE_LIBDB)
-	unset(CMAKE_REQUIRED_FLAGS)
+	unset(CMAKE_REQUIRED_DEFINITIONS)
 	unset(CMAKE_REQUIRED_LIBRARIES)
 
 	if(NOT HAVE_LIBDB)
@@ -910,13 +913,13 @@ endif(ENABLE_LARGEFILE)
 # Miscellaneous checks
 # ******************************
 
-set(CMAKE_REQUIRED_FLAGS ${GNOME_PLATFORM_CFLAGS})
+set(CMAKE_REQUIRED_DEFINITIONS ${GNOME_PLATFORM_CFLAGS})
 set(CMAKE_REQUIRED_INCLUDES ${GNOME_PLATFORM_INCLUDE_DIRS})
 set(CMAKE_REQUIRED_LIBRARIES ${GNOME_PLATFORM_LDFLAGS})
 CHECK_C_SOURCE_COMPILES("#include <gio/gio.h>
 			int main(void) { GPowerProfileMonitor *monitor = g_power_profile_monitor_dup_default (); g_clear_object (&monitor); return 0; }" HAVE_GPOWERPROFILEMONITOR)
 CHECK_SYMBOL_EXISTS(soup_message_set_force_http1 libsoup/soup.h HAVE_SOUP_MESSAGE_SET_FORCE_HTTP1)
-unset(CMAKE_REQUIRED_FLAGS)
+unset(CMAKE_REQUIRED_DEFINITIONS)
 unset(CMAKE_REQUIRED_INCLUDES)
 unset(CMAKE_REQUIRED_LIBRARIES)
 
@@ -961,12 +964,19 @@ set(CMAKE_REQUIRED_LIBRARIES ${CALENDAR_LDFLAGS})
 CHECK_C_SOURCE_COMPILES("#define LIBICAL_GLIB_UNSTABLE_API 1
 			#include <libical-glib/libical-glib.h>
 			int main(void) {
-				icalparameter *param;
+				ICalParameter *param;
 				param = i_cal_property_get_first_parameter (NULL, I_CAL_EMAIL_PARAMETER);
 				i_cal_parameter_get_email (param);
 				i_cal_parameter_new_email (NULL);
 				return 0;
 			}" HAVE_I_CAL_EMAIL_PARAMETER)
+
+CHECK_C_SOURCE_COMPILES("#define LIBICAL_GLIB_UNSTABLE_API 1
+			#include <libical-glib/libical-glib.h>
+			int main(void) {
+				i_cal_recurrence_get_by (NULL, I_CAL_BY_MONTH, 0);
+				return 0;
+			}" HAVE_I_CAL_RECURRENCE_GET_BY)
 
 unset(CMAKE_REQUIRED_DEFINITIONS)
 unset(CMAKE_REQUIRED_INCLUDES)

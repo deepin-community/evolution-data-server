@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 2016 Red Hat, Inc. (www.redhat.com)
  *
@@ -929,6 +928,36 @@ message_info_base_set_preview (CamelMessageInfo *mi,
 	if (changed) {
 		g_free (bmi->priv->preview);
 		bmi->priv->preview = g_strdup (preview);
+
+		if (bmi->priv->preview) {
+			gchar *ptr, *wrt = bmi->priv->preview;
+
+			/* make it a single line without tabs, with merged
+			   consecutive spaces and no leading spaces */
+			for (ptr = bmi->priv->preview; *ptr; ptr++) {
+				if (*ptr == '\r') {
+					/* just skip it */
+				} else if (*ptr == '\n' || *ptr == '\t') {
+					if (wrt > bmi->priv->preview && wrt[-1] != ' ') {
+						*wrt = ' ';
+						wrt++;
+					}
+				} else if (*ptr != ' ' || (wrt > bmi->priv->preview && wrt[-1] != ' ')) {
+					if (wrt != ptr)
+						*wrt = *ptr;
+					wrt++;
+				}
+			}
+
+			if (wrt != ptr)
+				*wrt = '\0';
+
+			/* shorten to up to CAMEL_MAX_PREVIEW_LENGTH characters (not bytes) */
+			if (g_utf8_strlen (bmi->priv->preview, -1) > CAMEL_MAX_PREVIEW_LENGTH) {
+				wrt = g_utf8_offset_to_pointer (bmi->priv->preview, CAMEL_MAX_PREVIEW_LENGTH);
+				*wrt = '\0';
+			}
+		}
 	}
 
 	camel_message_info_property_unlock (mi);

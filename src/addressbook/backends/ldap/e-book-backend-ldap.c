@@ -1,5 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
-
 /* e-book-backend-ldap.c - LDAP contact backend.
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -1873,8 +1871,6 @@ modify_contact_search_handler (LDAPOp *op,
 				printf ("Rename of DN necessary: %s -> %s (%s)\n", current_dn, modify_op->new_id, new_uid);
 #endif
 			if (current_dn && new_uid && modify_op->new_id) {
-				EBookBackendLDAP *bl = E_BOOK_BACKEND_LDAP (op->backend);
-				gint ldap_error;
 				gint rename_contact_msgid;
 
 				/* actually perform the ldap rename */

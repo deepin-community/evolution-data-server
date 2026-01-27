@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -387,11 +386,11 @@ maildir_store_delete_folder_sync (CamelStore *store,
 			dir = opendir (tmp);
 			if (dir) {
 				while ((d = readdir (dir))) {
-					gchar *name = d->d_name, *file;
+					gchar *dname = d->d_name, *file;
 
-					if (!strcmp (name, ".") || !strcmp (name, ".."))
+					if (!strcmp (dname, ".") || !strcmp (dname, ".."))
 						continue;
-					file = g_strdup_printf ("%s/%s", tmp, name);
+					file = g_strdup_printf ("%s/%s", tmp, dname);
 					unlink (file);
 					g_free (file);
 				}

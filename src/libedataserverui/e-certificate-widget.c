@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * SPDX-FileCopyrightText: (C) 2022 Red Hat (www.redhat.com)
  * SPDX-License-Identifier: LGPL-2.1-or-later
@@ -285,8 +284,14 @@ ecw_dup_usage (CERTCertificate *cert)
 		const gchar *text;
 	} usageinfo[] = {
 		/* x509 certificate usage types */
-		{ certificateUsageEmailSigner, N_("Digital Signature") },
-		{ certificateUsageEmailRecipient, N_("Key Encipherment") }
+		{ KU_DIGITAL_SIGNATURE, N_("Digital Signature") },
+		{ KU_KEY_ENCIPHERMENT, N_("Key Encipherment") },
+		{ KU_DATA_ENCIPHERMENT, N_("Data Encipherment") },
+		{ KU_NON_REPUDIATION, N_("Non Repudiation") },
+		{ KU_KEY_AGREEMENT, N_("Key Agreement") },
+		{ KU_KEY_CERT_SIGN, N_("Key Certificate Sign") },
+		{ KU_CRL_SIGN, N_("CRL Sign") },
+		{ KU_ENCIPHER_ONLY, N_("Encipher Only") }
 	};
 
 	GString *str = NULL;

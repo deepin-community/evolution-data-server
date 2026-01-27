@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -1014,6 +1013,7 @@ junk_test (struct _CamelSExp *f,
 	const GHashTable *ht;
 	const CamelNameValueArray *info_headers;
 	gboolean sender_is_known;
+	gboolean message_is_inconclusive = FALSE;
 	gboolean message_is_junk = FALSE;
 	GError *error = NULL;
 
@@ -1147,6 +1147,7 @@ junk_test (struct _CamelSExp *f,
 		switch (status) {
 			case CAMEL_JUNK_STATUS_INCONCLUSIVE:
 				status_desc = "inconclusive";
+				message_is_inconclusive = TRUE;
 				message_is_junk = FALSE;
 				break;
 			case CAMEL_JUNK_STATUS_MESSAGE_IS_JUNK:
@@ -1187,10 +1188,11 @@ junk_test (struct _CamelSExp *f,
 		printf (
 			"Message '%s' is determined to be %s\n",
 			camel_message_info_get_uid (info),
+			message_is_inconclusive ? "inconclusive" :
 			message_is_junk ? "*JUNK*" : "clean");
 
-	r = camel_sexp_result_new (f, CAMEL_SEXP_RES_BOOL);
-	r->value.number = message_is_junk;
+	r = camel_sexp_result_new (f, CAMEL_SEXP_RES_INT);
+	r->value.number = message_is_inconclusive ? 2 : message_is_junk ? 1 : 0;
 
 	return r;
 }

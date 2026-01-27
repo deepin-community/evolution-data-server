@@ -1,4 +1,3 @@
-/*-*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /* e-book-sqlite.c
  *
  * Copyright (C) 2013 Intel Corporation
@@ -6208,8 +6207,8 @@ ebsql_cursor_new (EBookSqlite *ebsql,
 
 	/* Sort parameters */
 	cursor->n_sort_fields = n_sort_fields;
-	cursor->sort_fields = g_memdup (sort_fields, sizeof (EContactField) * n_sort_fields);
-	cursor->sort_types = g_memdup (sort_types,  sizeof (EBookCursorSortType) * n_sort_fields);
+	cursor->sort_fields = g_memdup2 (sort_fields, sizeof (EContactField) * n_sort_fields);
+	cursor->sort_types = g_memdup2 (sort_types,  sizeof (EBookCursorSortType) * n_sort_fields);
 
 	/* Cursor state */
 	cursor->state.values = g_new0 (gchar *, n_sort_fields);

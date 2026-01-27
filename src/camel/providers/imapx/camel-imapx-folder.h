@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /* camel-imap-folder.h : Class for a IMAP folder
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -91,7 +90,7 @@ void		camel_imapx_folder_add_move_to_real_junk
 void		camel_imapx_folder_add_move_to_real_trash
 						(CamelIMAPXFolder *folder,
 						 const gchar *message_uid);
-void		camel_imapx_folder_add_move_to_inbox
+void		camel_imapx_folder_add_move_to_not_junk
 						(CamelIMAPXFolder *folder,
 						 const gchar *message_uid);
 void		camel_imapx_folder_invalidate_local_cache
@@ -113,7 +112,7 @@ void		camel_imapx_folder_claim_move_to_real_junk_uids
 void		camel_imapx_folder_claim_move_to_real_trash_uids
 						(CamelIMAPXFolder *folder,
 						 GPtrArray *out_uids_to_copy);
-void		camel_imapx_folder_claim_move_to_inbox_uids
+void		camel_imapx_folder_claim_move_to_not_junk_uids
 						(CamelIMAPXFolder *folder,
 						 GPtrArray *out_uids_to_copy);
 void		camel_imapx_folder_clear_move_to_real_trash_uids

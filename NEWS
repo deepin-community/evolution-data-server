@@ -1,12 +1,340 @@
-Evolution-Data-Server 3.50.1 2023-10-20
+Evolution-Data-Server 3.56.2 2025-05-23
+---------------------------------------
+
+Bug Fixes:
+	I#592 - Handle changed server pool in WebDAV collection sources ][
+	I#593 - CamelDataWrapper: Correct return value of size calculate functions (dagosuhn)
+	I#597 - GOA EWS: Fallback to likely EWS host URL when autodicovery fails
+
+Evolution-Data-Server 3.56.1 2025-04-11
+---------------------------------------
+
+Bug Fixes:
+	I#592 -  Handle changed server pool in WebDAV collection sources
+
+Evolution-Data-Server 3.56.0 2025-03-14
+---------------------------------------
+
+Translations:
+	Balázs Úr (hu)
+	Jean-Marc Tissières (fr)
+	Luna Jernberg (sv)
+	Piotr Drąg (pl)
+	Rafael Fontenelle (pt_BR)
+	Sabri Ünal (tr)
+
+Evolution-Data-Server 3.55.3 2025-02-28
+---------------------------------------
+
+Bug Fixes:
+	I#582 - test-book-client-view-operations: Enforce LC_COLLATE for the backend process
+	I#585 - alarm-notify: Tasks without DTSTART cause runtime warning
+
+Miscellaneous:
+	EBackend: Change when adding signal handler for "network-changed"
+	CI: Use a Fedora image instead of Flatpak build
+	camel-mime-utils: Correct a compiler warning [-Wpointer-sign]
+
+Translations:
+	Artur S0 (ru)
+	Ekaterine Papava (ka)
+	Jiri Eischmann (cs)
+	Martin (sl)
+
+Evolution-Data-Server 3.55.2 2025-01-31
+---------------------------------------
+
+Bug Fixes:
+	I#576 - Contacts: Categories miscalculated in the cache
+	I#581 - CamelGpgContext: Verify status buffer read is in buffer boundary
+	I#583 - devel-doc: Do not require tests to be build
+	I#584 - ESoupSession: Leaked input stream on 503 response
+	M!167 - build: Use Heimdal KRB5 implementation when found (Dan Cîrnaț)
+	M!169 - camel_content_type_decode: Remove unneeded g_free() call (Дилян Палаузов)
+	ews-I#295 - Calendar: Import of forwarded meeting as bare event
+
+Miscellaneous:
+	Do not use variable named 'bool' in the code
+	Camel: Disable photo-loading when used gpg version does not understand it
+	ESoupSession: Check validity of passed-in URI
+
+Translations:
+	Anders Jonsson (sv)
+	Artur S0 (ru)
+	Ekaterine Papava (ka)
+	Jan Tojnar ()
+	Yuri Chornoivan (uk)
+
+Evolution-Data-Server 3.55.1 2025-01-03
+---------------------------------------
+
+Bug Fixes:
+	I#562 - Pass GError instead of CamelException to camel_movemail_solaris (Niveditha Rau)
+	I#563 - Fix argument types in ENABLE_BROKEN_SPOOL code (Alan Coopersmith)
+	I#564 - Use GIConv instead of iconv_t with iconv wrappers (Alan Coopersmith)
+	I#566 - ESoupSession: Sometimes accesses server without OAuth2 token
+	I#568 - CalDAV: Do not use SCHEDULE-AGENT parameter
+	I#570 - Adapt to libical icalrecurrencetype changes
+	I#571 - libedataserverui: Avoid initializing the icon_theme when building introspection data (Jordan Petridis)
+	I#574 - Fails to build/link against icu 76.1
+	M!162 - EContact: Don't duplicate strings twice in get_property() (Andy Holmes)
+	M!164 - EWebDAVDiscoverWidget: show Server-side scheduling (Дилян Палаузов)
+	M!165 - Set project-wide emacs formatting rules (Дилян Палаузов)
+	evo-I#2897 - Correct certificate key usage constants
+
+Miscellaneous:
+	libebook-contacts: Add test for EContact GObject property get/set functions
+	build: Update CMake uninstall file
+	Typo assing -> assign (Дилян Палаузов)
+	reminder-watcher: Verify calendar's last-notify time before showing reminder
+
+Translations:
+	Anders Jonsson (sv)
+	Boyuan Yang (zh_CN)
+	Daniel Rusek (cs)
+	Jean-Marc Tissières (fr)
+	Juliano de Souza Camargo (pt_BR)
+	Martin (sl)
+	Милош Поповић (sr)
+	Sabri Ünal (tr)
+	Yuri Chornoivan (uk)
+
+Evolution-Data-Server 3.54.0 2024-09-13
+---------------------------------------
+
+Bug Fixes:
+	I#558 - Camel: Prefer GLib API for gpg process spawning
+	I#559 - Camel: Correct typos in disabled code
+
+Miscellaneous:
+	docs: Correct developer documentation to install API indexes
+
+Translations:
+	Alan Mortensen (da)
+	Anders Jonsson (sv)
+	Boyuan Yang (zh_CN)
+	Piotr Drąg (pl)
+	Sabri Ünal (tr)
+
+Evolution-Data-Server 3.53.3 2024-08-30
+---------------------------------------
+
+Bug Fixes:
+	I#557 - Camel: Claim attachment in multipart/mixed
+
+Translations:
+	Artur S0 (ru)
+	Asier Sarasua Garmendia (eu)
+	Balázs Úr (hu)
+	Bruce Cowan (en_GB)
+	Boyuan Yang (zh_CN)
+	Ekaterine Papava (ka)
+
+Evolution-Data-Server 3.53.2 2024-08-02
+---------------------------------------
+
+Bug Fixes:
+	I#550 - Calendar: Respect TZDIR env variable
+	I#551 - alarm-notify: Save acknowledge time without sending iTip message
+	I#552 - Calendar: Anniversaries hidden when book goes to online
+	I#553 - Camel: 'match-threads' in search folder can miss messages
+	M!159 - Add helper object to talk to intune (Microsoft OAuth2 broker service) (Felix Moessbauer)
+	M!160 - e-ms-oapxbc: Check if broker is running before starting it (Felix Moessbauer)
+	M!161 - e-ms-oapxbc: Use GDBusProxy to communicate with broker (Felix Moessbauer)
+	evo-I#2780 - Enhance "junk-test" to return also "inconclusive" value
+	evo-I#2790 - "Thread by Subject" option not propagated to Search Folders
+
+Miscellaneous:
+	module-gnome-online-accounts: Recognize "Microsoft 365" accounts
+	e_util_get_source_full_name: Fix possible runtime warning
+
+Translations:
+	Artur S0 (ru)
+	Boyuan Yang (zh_CN)
+	Martin (sl)
+	Yuri Chornoivan (uk)
+
+Evolution-Data-Server 3.53.1 2024-06-28
+---------------------------------------
+
+Bug Fixes:
+	I#498 - vCard: Incorrectly parses non-UTF-8 vCard data
+	I#518 - WebDAV: Handle `Retry-After` header on 503 error
+	I#531 - Camel: Sanitize exported OpenPGP public key before transfer
+	I#534 - Google Task stale item cannot be deleted
+	I#536 - Calendar: "This and Future" modifications can duplicate events
+	I#537 - Camel: GPG message decryption can sometimes miss content
+	I#539 - CardDAV: Prefetch PHOTO/LOGO when being remote URL
+	I#543 - Camel: Attachments not recognized when filtering POP3 message
+	I#545 - addressbook-export: Enhance listing of available sources
+	I#546 - ECalClient: Generate RECURRENCE-ID in UTC
+	I#547 - OAuth2 Prompt: Enlarge "Open in Browser" button
+	I#548 - Camel: Search folder's message UID is not persistent
+	I#549 - Camel: Unfolding headers eats consecutive white-spaces
+	M!157 - Flatpak: Drop org.freedesktop.Sdk.Extension.vala and rely on GNOME SDK (Rico Tzschichholz)
+	evo-I#2230 - Configurable timeout for WebDAV sources
+	evo-I#2697 - IMAPX: Add option to define Not-Junk folder
+	evo-I#2720 - Add e_util_host_is_in_domain helper (Peter Simonyi)
+
+Miscellaneous:
+	Calendar: Update comment of E_CAL_STATIC_CAPABILITY_RETRACT_SUPPORTED
+	CamelMimePart: Fix runtime warning when removing some headers
+	CamelMimeMessage: Check for non-NULL Subject value before using it
+	IMAPx: Correct return value of imapx_splice_with_progress() when cancelled
+	IMAPX: Correct path returned by imapx_get_filename()
+	OAuth2 Prompter: Fix two memory leaks
+	EOAuth2ServiceOutlook: Cannot be used with IMAP
+	EOAuth2ServiceYahoo: Update redirect URI
+	OAuth2Prompter: Fix possible crash on application quit
+	Mark org.gnome.evolution-data-server.OAuth2-handler.desktop for translation
+	Fix few issues reported by Coverity Scan
+	CI: Pass --verbose to flatpak-builder (Bart Piotrowski)
+	CI: Update OpenLDAP version in devel/nightly build
+	CI: Workaround broken git clone for libcanberra
+
+Translations:
+	Anders Jonsson (sv)
+	Andika Triwidada (id)
+	Artur S0 (ru)
+	Aurimas Černius (lt)
+	Balázs Úr (hu)
+	Fabio Tomat (fur)
+	Martin (sl)
+	Olga Smirnova (ie)
+	Piotr Drąg (pl)
+	Sabri Ünal (tr)
+	Yuri Chornoivan (uk)
+
+Evolution-Data-Server 3.52.0 2024-03-15
+---------------------------------------
+
+Bug Fixes:
+	I#523 - addressbook: Crash on authenticate and finalize in two threads
+	evo-I#2672 - Calendar: Prefer html/markdown description in preview
+
+Miscellaneous:
+	SetupBuildFlags.cmake: Remove "-Wl,--no-undefined" from compiler flags
+	Replace https://wiki.gnome.org/Apps/Evolution in the sources
+	Replace live.gnome.org with wiki.gnome.org URI (Andre Klapper)
+
+Translations:
+	Aefgh Threenine (th)
+	Alan Mortensen (da)
+	Anders Jonsson (sv)
+	Andi Chandler (en_GB)
+	Balázs Úr (hu)
+	Bruce Cowan (en_GB)
+	Daniel Mustieles (es)
+	Daniel Rusek (cs)
+	Emin Tufan Çetin (tr)
+	Jean-Marc Tissières (fr)
+	Rūdolfs Mazurs (lv)
+
+Evolution-Data-Server 3.51.3 2024-03-01
+---------------------------------------
+
+Bug Fixes:
+	I#139 - CalDAV Scheduling - utilize SCHEDULE-AGENT property parameter
+	I#522 - build: Make sure tests run in serial
+	I#526 - IMAPx: Disable PREVIEW fetch on error
+	I#527 - Camel: Long header folding should not add empty folding line
+	I#528 - Camel: Fix possible busy loop in camel-lock-helper
+	evo-I#2675 - Support webcals: URI
+
+Translations:
+	Asier Sarasua Garmendia (eu)
+
+Evolution-Data-Server 3.51.2 2024-02-09
+---------------------------------------
+
+Bug Fixes:
+	I#513 - ephonenumber: Switch from 'std::auto_ptr' to 'std::unique_ptr'
+	I#514 - Calendar: Decode attachment URI before inline it
+	I#515 - OAuth2: Enable HTML5 database and local storage features for web view
+	I#517 - Anniversary field from Google Contacts doesn't sync
+	I#520 - Evolution Alarm Notify: Ship app icon
+	I#521 - Camel: Convert text to UTF-8 when creating message preview
+	I#525 - EXmlDocument: Save content with xml header
+	M!143 - ECredentialsPrompter: Port to GTask (Corentin Noël)
+	M!149 - camel-lock-helper: Change id to actually hold a guint32 (Corentin Noël)
+	M!149 - CamelSettings: Remove the use of the deprecated GParameter (Corentin Noël)
+	M!151 - CamelFolderThread: Remove unused possible future API (Corentin Noël)
+	M!153 - IMAPX: Ensure preview has been cached (Cédric Bellegarde)
+	M!154 - GLibTools: Automatically get the dependencies of a GResource (Corentin Noël)
+
+Miscellaneous:
+	build: Don't set CFLAGS returned by pkg-config as CMAKE_REQUIRED_FLAGS
+	build: Bump CMake version requirement to 3.15 and change libedataserverui4 .h files copy
+	camel-mime-filter-preview: Correct an 'if' statement
+	vcard: Fix check for group name in e_vcard_remove_attributes()
+	Update Google server names in checks for "is Google server"
+	ESourceOpenPGP: Add "ask-send-public-key" option
+
+Translations:
+	Artur S0 (ru)
+	Christian Kirbach (de)
+	Julia Dronova (ru)
+	Juliano de Souza Camargo (pt_BR)
+	Yuri Chornoivan (uk)
+
+Evolution-Data-Server 3.51.1 2024-01-05
 ---------------------------------------
 
 Bug Fixes:
 	I#494 - Update default calendar colors
+	I#505 - alarm-notify: Some reminders could be lost
+	I#506 - alarm-notify: Birthday floating date shifted by one day
+	I#507 - sqlite3_enable_shared_cache is deprecated
+	I#511 - Camel: Hide errors from for-offline download
+	I#512 - IMAP: Copy/move messages in smaller batches
+	M!123 - libebackend: Replace GSimpleAsyncResult with GTask (Corentin Noël)
+	M!127 - Port EBookClient to the GTask API (Corentin Noël)
+	M!131 - Port EClient to the GTask API (Corentin Noël)
+	M!132 - EUserPrompter: Replace GSimpleAsyncResult with GTask (Corentin Noël)
+	M!133 - libedataserver: Recognize schedule-inbox and schedule-outbox Collections (Дилян Палаузов)
+	M!135 - goa: Add support for WebDAV provider (Mara Lasker)
+	M!137 - Replace several GSimpleAsyncResult occurences with GTask (Corentin Noël)
+	M!138 - e_webdav_discover_split_resources() remove unnecessary code (Дилян Палаузов)
+	M!139 - CamelGpgContext: Don't leak istream in gpg_sign_sync() (Guido Günther)
+	M!140 - docs: Add index.html (Corentin Noël)
+	M!141 - libedata-cal/book: Replace GSimpleAsyncResult with GTask (Corentin Noël)
+	M!142 - camel-net-utils: Replace deprecated unicode function (Corentin Noël)
+	M!145 - e-xml-utils: Fix build with libxml2 2.12 (Jürg Billeter)
+	M!146 - ECredentialsPrompter: Remove GSimpleAsyncResult from the public API (Corentin Noël)
+	M!147 - Replace g_memdup with g_memdup2 everywhere (Corentin Noël)
+	M!148 - build: remove references to unused optional dependencies (maxine)
+	evo-I#935 - Mail: Preview message body in the message list
 	evo-I#1436 - Mail: Correct conversion of UTF-16 encoded text files
+	evo-I#1842 - Add option to show reminder before every event in calendar
+	evo-I#2609 - S/MIME error message - part of string not localized
+
+Miscellaneous:
+	camel-message-info-base: Sanitize 'preview' property value on set
+	IMAPx: Remove sanity check when reading PREVIEW result
+	IMAPx: Remove forgotten debug print
+	misc: Update description of the provided libraries
+	build: Use -Wshadow build option, if available
+	addressbook-export: Fix two memory leaks
+	OAuth2: Add scheme handler for OAuth2 prompts in external browser
+	module-google-backend: Fix a ref/unref imbalance found by Coverity Scan
+	EReminderWatcher: Last-notified time not always set
+	ESourceMailSignature: Signature load can fail on runtime warning
+	build: Correct incompatible type warning from check for I_CAL_EMAIL_PARAMETER
+	camel-smime-context: Fix a typo in a localized string
+	CamelOperation: Add function to dupe current message
+	Camel: Ignore errors about missing messages during filtering
 
 Translations:
 	Alan Mortensen (da)
+	Artur S0 (ru)
+	Boyuan Yang (zh_CN)
+	Ekaterine Papava (ka)
+	Florentina Mușat (ro)
+	Jürgen Benvenuti (de)
+	Kukuh Syafaat (id)
+	Martin (sl)
+	Sabri Ünal (tr)
+	Yuri Chornoivan (uk)
 
 Evolution-Data-Server 3.50.0 2023-09-15
 ---------------------------------------

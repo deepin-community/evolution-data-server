@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /* Evolution calendar - Live search view implementation
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -1308,8 +1307,16 @@ e_data_cal_view_notify_components_modified (EDataCalView *view,
 
 	for (l = ecalcomponents; l; l = l->next) {
 		ECalComponent *comp = l->data;
+		ECalComponentId *id;
 
 		g_warn_if_fail (E_IS_CAL_COMPONENT (comp));
+
+		id = e_cal_component_get_id (comp);
+
+		if (g_hash_table_contains (view->priv->ids, id))
+			e_cal_component_id_free (id);
+		else
+			g_hash_table_insert (view->priv->ids, id, GUINT_TO_POINTER (1));
 
 		notify_change_component (view, comp);
 	}

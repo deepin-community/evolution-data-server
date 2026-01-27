@@ -125,24 +125,6 @@ google_backend_can_use_google_auth (ESource *source)
 }
 
 static gboolean
-host_ends_with (const gchar *host,
-		const gchar *ends_with)
-{
-	gint host_len, ends_with_len;
-
-	if (!host || !ends_with)
-		return FALSE;
-
-	host_len = strlen (host);
-	ends_with_len = strlen (ends_with);
-
-	if (host_len <= ends_with_len)
-		return FALSE;
-
-	return g_ascii_strcasecmp (host + host_len - ends_with_len, ends_with) == 0;
-}
-
-static gboolean
 google_backend_is_google_host (ESourceAuthentication *auth_extension,
 			       gboolean *out_requires_oauth2)
 {
@@ -154,12 +136,14 @@ google_backend_is_google_host (ESourceAuthentication *auth_extension,
 
 	host = e_source_authentication_dup_host (auth_extension);
 
-	requires_oauth2 = host && host_ends_with (host, "googleusercontent.com");
+	requires_oauth2 = host && (
+		e_util_host_is_in_domain (host, "googleapis.com") ||
+		e_util_host_is_in_domain (host, "googleusercontent.com"));
 
 	is_google = requires_oauth2 || (host && (
-		host_ends_with (host, "gmail.com") ||
-		host_ends_with (host, "googlemail.com") ||
-		host_ends_with (host, "google.com")));
+		e_util_host_is_in_domain (host, "gmail.com") ||
+		e_util_host_is_in_domain (host, "googlemail.com") ||
+		e_util_host_is_in_domain (host, "google.com")));
 
 	g_free (host);
 
@@ -447,13 +431,8 @@ google_add_task_list (ECollectionBackend *collection,
 	extension = e_source_get_extension (source, E_SOURCE_EXTENSION_ALARMS);
 	e_source_alarms_set_include_me (E_SOURCE_ALARMS (extension), FALSE);
 
-	if (is_new) {
-		ESourceRegistryServer *server;
-
-		server = e_collection_backend_ref_server (collection);
+	if (is_new)
 		e_source_registry_server_add_source (server, source);
-		g_object_unref (server);
-	}
 
 	g_object_unref (source);
 	g_object_unref (server);

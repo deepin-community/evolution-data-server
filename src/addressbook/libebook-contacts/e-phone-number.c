@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 2012,2013 Intel Corporation
  *
@@ -231,7 +230,7 @@ e_phone_number_to_string (const EPhoneNumber *phone_number,
  *
  * Queries the @phone_number's country calling code and optionally stores the country
  * calling code's origin in @source. For instance when parsing "+1-617-5423789" this
- * function would return one and assing E_PHONE_NUMBER_COUNTRY_FROM_FQTN to @source.
+ * function would return one and assign E_PHONE_NUMBER_COUNTRY_FROM_FQTN to @source.
  *
  * Returns: A valid country calling code, or zero if no code is known.
  *

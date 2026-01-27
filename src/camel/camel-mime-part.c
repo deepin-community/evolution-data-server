@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8; fill-column: 160 -*- */
 /* camelMimePart.c : Abstract class for a mime_part
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -34,10 +33,15 @@
 #include "camel-mime-filter-basic.h"
 #include "camel-mime-filter-charset.h"
 #include "camel-mime-filter-crlf.h"
+#include "camel-mime-filter-html.h"
+#include "camel-mime-filter-preview.h"
+#include "camel-mime-filter-windows.h"
 #include "camel-mime-parser.h"
 #include "camel-mime-part-utils.h"
 #include "camel-mime-part.h"
 #include "camel-mime-utils.h"
+#include "camel-multipart.h"
+#include "camel-null-output-stream.h"
 #include "camel-stream-filter.h"
 #include "camel-stream-mem.h"
 #include "camel-stream-null.h"
@@ -316,20 +320,23 @@ mime_part_process_header (CamelMedium *medium,
 	header_type = (CamelHeaderType) GPOINTER_TO_INT (g_hash_table_lookup (header_name_table, name));
 	switch (header_type) {
 	case HEADER_DESCRIPTION: /* raw header->utf8 conversion */
-		g_free (mime_part->priv->description);
-		if (camel_data_wrapper_get_mime_type_field (CAMEL_DATA_WRAPPER (mime_part))) {
-			charset = camel_content_type_param (camel_data_wrapper_get_mime_type_field (CAMEL_DATA_WRAPPER (mime_part)), "charset");
-			charset = camel_iconv_charset_name (charset);
-		} else
-			charset = NULL;
-		mime_part->priv->description = g_strstrip (camel_header_decode_string (value, charset));
+		g_clear_pointer (&mime_part->priv->description, g_free);
+		if (value) {
+			if (camel_data_wrapper_get_mime_type_field (CAMEL_DATA_WRAPPER (mime_part))) {
+				charset = camel_content_type_param (camel_data_wrapper_get_mime_type_field (CAMEL_DATA_WRAPPER (mime_part)), "charset");
+				charset = camel_iconv_charset_name (charset);
+			} else
+				charset = NULL;
+			mime_part->priv->description = g_strstrip (camel_header_decode_string (value, charset));
+		}
 		break;
 	case HEADER_DISPOSITION:
 		mime_part_set_disposition (mime_part, value);
 		break;
 	case HEADER_CONTENT_ID:
-		g_free (mime_part->priv->content_id);
-		mime_part->priv->content_id = camel_header_contentid_decode (value);
+		g_clear_pointer (&mime_part->priv->content_id, g_free);
+		if (value)
+			mime_part->priv->content_id = camel_header_contentid_decode (value);
 		break;
 	case HEADER_ENCODING:
 		text = camel_header_token_decode (value);
@@ -341,13 +348,16 @@ mime_part_process_header (CamelMedium *medium,
 		mime_part->priv->content_md5 = g_strdup (value);
 		break;
 	case HEADER_CONTENT_LOCATION:
-		g_free (mime_part->priv->content_location);
-		mime_part->priv->content_location = camel_header_location_decode (value);
+		g_clear_pointer (&mime_part->priv->content_location, g_free);
+		if (value)
+			mime_part->priv->content_location = camel_header_location_decode (value);
 		break;
 	case HEADER_CONTENT_TYPE:
-		content_type = camel_content_type_decode (value);
-		if (content_type)
-			camel_data_wrapper_take_mime_type_field (CAMEL_DATA_WRAPPER (mime_part), content_type);
+		if (value) {
+			content_type = camel_content_type_decode (value);
+			if (content_type)
+				camel_data_wrapper_take_mime_type_field (CAMEL_DATA_WRAPPER (mime_part), content_type);
+		}
 		break;
 	default:
 		return FALSE;
@@ -625,7 +635,7 @@ mime_part_write_to_stream_sync (CamelDataWrapper *dw,
 		}
 
 		if (mp->priv->encoding != camel_data_wrapper_get_encoding (content)) {
-			gchar *content;
+			gchar *tmp_content;
 
 			switch (mp->priv->encoding) {
 			case CAMEL_TRANSFER_ENCODING_BASE64:
@@ -639,11 +649,9 @@ mime_part_write_to_stream_sync (CamelDataWrapper *dw,
 				if (filename == NULL)
 					filename = "untitled";
 
-				content = g_strdup_printf (
-					"begin 644 %s\n", filename);
-				count = camel_stream_write_string (
-					ostream, content, cancellable, error);
-				g_free (content);
+				tmp_content = g_strdup_printf ("begin 644 %s\n", filename);
+				count = camel_stream_write_string (ostream, tmp_content, cancellable, error);
+				g_free (tmp_content);
 
 				if (count == -1)
 					return -1;
@@ -818,7 +826,7 @@ mime_part_write_to_output_stream_sync (CamelDataWrapper *dw,
 		}
 
 		if (mp->priv->encoding != camel_data_wrapper_get_encoding (content)) {
-			gchar *content;
+			gchar *tmp_content;
 
 			switch (mp->priv->encoding) {
 			case CAMEL_TRANSFER_ENCODING_BASE64:
@@ -834,13 +842,11 @@ mime_part_write_to_output_stream_sync (CamelDataWrapper *dw,
 				if (filename == NULL)
 					filename = "untitled";
 
-				content = g_strdup_printf (
-					"begin 644 %s\n", filename);
-				success = g_output_stream_write_all (
-					output_stream,
-					content, strlen (content),
+				tmp_content = g_strdup_printf ("begin 644 %s\n", filename);
+				success = g_output_stream_write_all (output_stream,
+					tmp_content, strlen (tmp_content),
 					&bytes_written, cancellable, error);
-				g_free (content);
+				g_free (tmp_content);
 
 				if (!success)
 					return -1;
@@ -1004,6 +1010,134 @@ mime_part_construct_from_parser_sync (CamelMimePart *mime_part,
 	return success;
 }
 
+static gboolean
+mime_part_data_is_utf16 (CamelMimePart *part,
+			 gboolean *out_be_variant)
+{
+	CamelStream *filtered_stream;
+	CamelMimeFilter *filter;
+	CamelStream *stream;
+	const gchar *charset;
+	gboolean is_utf16;
+
+	g_return_val_if_fail (CAMEL_IS_MIME_PART (part), FALSE);
+
+	stream = camel_stream_null_new ();
+	filtered_stream = camel_stream_filter_new (stream);
+	filter = camel_mime_filter_bestenc_new (CAMEL_BESTENC_GET_CHARSET);
+	camel_stream_filter_add (CAMEL_STREAM_FILTER (filtered_stream), CAMEL_MIME_FILTER (filter));
+	camel_data_wrapper_decode_to_stream_sync (camel_medium_get_content (CAMEL_MEDIUM (part)), filtered_stream, NULL, NULL);
+	g_object_unref (filtered_stream);
+	g_object_unref (stream);
+
+	charset = camel_mime_filter_bestenc_get_best_charset (CAMEL_MIME_FILTER_BESTENC (filter));
+	*out_be_variant = g_strcmp0 (charset, "UTF-16BE") == 0;
+	is_utf16 = *out_be_variant || g_strcmp0 (charset, "UTF-16LE") == 0;
+
+	g_object_unref (filter);
+
+	return is_utf16;
+}
+
+static gchar *
+mime_part_generate_preview (CamelMimePart *mime_part,
+			    CamelGeneratePreviewFunc func,
+			    gpointer user_data)
+{
+	gchar *preview = NULL;
+
+	if (func)
+		preview = func (mime_part, user_data);
+
+	if (!preview && (!camel_mime_part_get_disposition (mime_part) ||
+	    g_ascii_strcasecmp (camel_mime_part_get_disposition (mime_part), "inline") == 0)) {
+		CamelContentType *ct;
+		CamelDataWrapper *content;
+
+		ct = camel_mime_part_get_content_type (mime_part);
+		content = camel_medium_get_content (CAMEL_MEDIUM (mime_part));
+
+		if (ct && content && (
+		    camel_content_type_is (ct, "text", "plain") ||
+		    camel_content_type_is (ct, "text", "html"))) {
+			CamelStream *base;
+			CamelStream *filtered_stream;
+			CamelMimeFilter *filter;
+			CamelMimeFilter *windows = NULL;
+			const gchar *text;
+			const gchar *charset = NULL;
+			gboolean utf16_be_variant = FALSE;
+
+			base = camel_stream_null_new ();
+			filtered_stream = camel_stream_filter_new (base);
+
+			if (mime_part_data_is_utf16 (mime_part, &utf16_be_variant)) {
+				if (utf16_be_variant)
+					charset = "UTF-16BE";
+				else
+					charset = "UTF-16LE";
+			} else if ((charset = camel_content_type_param (ct, "charset")) &&
+				   g_ascii_strncasecmp (charset, "iso-8859-", 9) == 0) {
+				GOutputStream *null_stream;
+				GOutputStream *filter_stream;
+
+				/* Since a few Windows mailers like to claim they sent
+				 * out iso-8859-# encoded text when they really sent
+				 * out windows-cp125#, do some simple sanity checking
+				 * before we move on... */
+
+				null_stream = camel_null_output_stream_new ();
+				windows = camel_mime_filter_windows_new (charset);
+				filter_stream = camel_filter_output_stream_new (null_stream, windows);
+				g_filter_output_stream_set_close_base_stream (G_FILTER_OUTPUT_STREAM (filter_stream), FALSE);
+
+				camel_data_wrapper_decode_to_output_stream_sync (CAMEL_DATA_WRAPPER (mime_part),
+					filter_stream, NULL, NULL);
+				g_output_stream_flush (filter_stream, NULL, NULL);
+
+				g_object_unref (filter_stream);
+				g_object_unref (null_stream);
+
+				charset = camel_mime_filter_windows_real_charset (CAMEL_MIME_FILTER_WINDOWS (windows));
+			}
+
+			if (camel_content_type_is (ct, "text", "html")) {
+				filter = camel_mime_filter_html_new ();
+				camel_stream_filter_add (CAMEL_STREAM_FILTER (filtered_stream), filter);
+				g_clear_object (&filter);
+			}
+
+			if (charset != NULL) {
+				filter = camel_mime_filter_charset_new (charset, "UTF-8");
+				if (filter != NULL) {
+					camel_stream_filter_add (CAMEL_STREAM_FILTER (filtered_stream), filter);
+					g_clear_object (&filter);
+				}
+			}
+
+			filter = camel_mime_filter_preview_new (CAMEL_MAX_PREVIEW_LENGTH);
+			camel_stream_filter_add (CAMEL_STREAM_FILTER (filtered_stream), filter);
+
+			camel_data_wrapper_decode_to_stream_sync (content, filtered_stream, NULL, NULL);
+			camel_stream_flush (filtered_stream, NULL, NULL);
+
+			text = camel_mime_filter_preview_get_text (CAMEL_MIME_FILTER_PREVIEW (filter));
+
+			if (text && *text)
+				preview = g_strdup (text);
+
+			g_clear_object (&filtered_stream);
+			g_clear_object (&windows);
+			g_clear_object (&filter);
+			g_clear_object (&base);
+		} else if (ct && content && CAMEL_IS_MULTIPART (content)) {
+			preview = camel_multipart_generate_preview (CAMEL_MULTIPART (content), func, user_data);
+		}
+	}
+
+	return preview;
+}
+
 static void
 camel_mime_part_class_init (CamelMimePartClass *class)
 {
@@ -1032,6 +1166,7 @@ camel_mime_part_class_init (CamelMimePartClass *class)
 	data_wrapper_class->construct_from_input_stream_sync = mime_part_construct_from_input_stream_sync;
 
 	class->construct_from_parser_sync = mime_part_construct_from_parser_sync;
+	class->generate_preview = mime_part_generate_preview;
 
 	g_object_class_install_property (
 		object_class,
@@ -1693,4 +1828,38 @@ camel_mime_part_construct_from_parser_finish (CamelMimePart *mime_part,
 		result, camel_mime_part_construct_from_parser), FALSE);
 
 	return g_task_propagate_boolean (G_TASK (result), error);
+}
+
+/**
+ * camel_mime_part_generate_preview:
+ * @mime_part: a #CamelMimePart
+ * @func: (nullable) (scope call): an optional #CamelGeneratePreviewFunc function, or %NULL
+ * @user_data: (closure func): user data for the @func, or %NULL
+ *
+ * Generates preview of the @mime_part, to be used in the interface,
+ * read by the users.
+ *
+ * The optional @func can be used to override default preview generation
+ * function. If provided, it's always called as the first try on the parts.
+ *
+ * Returns: (nullable) (transfer full): part's preview as a new string,
+ *    or %NULL, when cannot be generated. Free with g_free(), when no
+ *    longer needed.
+ *
+ * Since: 3.52
+ **/
+gchar *
+camel_mime_part_generate_preview (CamelMimePart *mime_part,
+				  CamelGeneratePreviewFunc func,
+				  gpointer user_data)
+{
+	CamelMimePartClass *klass;
+
+	g_return_val_if_fail (CAMEL_IS_MIME_PART (mime_part), NULL);
+
+	klass = CAMEL_MIME_PART_GET_CLASS (mime_part);
+	g_return_val_if_fail (klass != NULL, NULL);
+	g_return_val_if_fail (klass->generate_preview != NULL, NULL);
+
+	return klass->generate_preview (mime_part, func, user_data);
 }

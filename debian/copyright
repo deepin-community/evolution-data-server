@@ -24,7 +24,7 @@ Authors:
  Jesse Pavel (jpavel@ximian.com)
  Jon Trowbridge <trow@ximian.com>
  Christopher James Lahey <clahey@ximian.com>
- Christian Kellner <gicmo@gnome.org> 
+ Christian Kellner <gicmo@gnome.org>
  David Trowbridge <trowbrds@cs.colorado.edu>
  Eskil Heyn Olsen <deity@eskil.dk>
  Damon Chaplin <damon@ximian.com>
@@ -34,7 +34,7 @@ Authors:
  Tor Lillqvist <tml@novell.com>
  Parthasarathi Susarla <sparthasarathi@novell.com>
  Jacob Berkman <jacob@ximian.com>
- Matthew Barnes <mbarnes@redhat.com> 
+ Matthew Barnes <mbarnes@redhat.com>
  Srinivasa Ragavan <sragavan@novell.com>
  Ross Burton <ross@burtonini.com>
 
@@ -63,11 +63,6 @@ This library is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 Library General Public License for more details.
-
-You should have received a copy of the GNU Library General Public
-License along with this library; if not, write to the
-Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
-Boston, MA  02110-1301, USA.
 
 On Debian systems, the complete text of the GNU Library General Public
 License can be found in /usr/share/common-licenses/LGPL-2. Some of the

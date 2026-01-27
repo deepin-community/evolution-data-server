@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /* camel-movemail.c: mbox copying function
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -146,7 +145,7 @@ camel_movemail (const gchar *source,
 	}
 
 #ifdef ENABLE_BROKEN_SPOOL
-	res = camel_movemail_solaris (sfd, dfd, ex);
+	res = camel_movemail_solaris (sfd, dfd, error);
 #else
 	res = camel_movemail_copy_file (sfd, dfd, error);
 #endif
@@ -367,7 +366,7 @@ camel_movemail_copy_filter (gint fromfd,
 	gchar buffer[4096 + PRE_SIZE];
 	gint written = 0;
 	gchar *filterbuffer;
-	gint filterlen, filterpre;
+	gsize filterlen, filterpre;
 
 	d (printf ("writing %d bytes ... ", bytes));
 
@@ -407,6 +406,9 @@ camel_movemail_copy_filter (gint fromfd,
 				filter, buffer + PRE_SIZE, towrite, PRE_SIZE,
 				&filterbuffer, &filterlen, &filterpre);
 			towrite = filterlen;
+
+			if (camel_mime_filter_get_request_stop (filter))
+				break;
 		}
 
 		d (printf ("writing %d filtered bytes\n", towrite));
@@ -484,7 +486,7 @@ camel_movemail_solaris (gint oldsfd,
 {
 	CamelMimeParser *mp;
 	gchar *buffer;
-	gint len;
+	gsize len;
 	gint sfd;
 	CamelMimeFilter *ffrom;
 	gint ret = 1;

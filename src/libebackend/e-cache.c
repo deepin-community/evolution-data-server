@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 2017 Red Hat, Inc. (www.redhat.com)
  *
@@ -2054,8 +2053,6 @@ e_cache_foreach_update_cb (ECache *cache,
 	    fu->revision_index == -1 ||
 	    fu->object_index == -1 ||
 	    fu->state_index == -1) {
-		gint ii;
-
 		for (ii = 0; ii < ncols && (fu->uid_index == -1 ||
 		     fu->revision_index == -1 ||
 		     fu->object_index == -1 ||

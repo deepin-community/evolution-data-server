@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 2019 Red Hat, Inc. (www.redhat.com)
  *
@@ -668,7 +667,7 @@ test_component_struct_alarm (void)
 
 		if (values[ii].with_properties) {
 			ECalComponentPropertyBag *bag;
-			gint ii;
+			gint jj;
 
 			nth_properties++;
 
@@ -676,17 +675,17 @@ test_component_struct_alarm (void)
 
 			g_assert_nonnull (bag);
 
-			for (ii = nth_properties; ii > 0; ii--) {
+			for (jj = nth_properties; jj > 0; jj--) {
 				ICalProperty *prop;
 
-				if (ii == 0) {
+				if (jj == 0) {
 					prop = i_cal_property_new_url ("https://www.gnome.org");
-				} else if (ii == 1) {
+				} else if (jj == 1) {
 					prop = i_cal_property_new_voter ("mailto:user@no.where");
 				} else {
 					gchar *x_name;
 
-					x_name = g_strdup_printf ("X-CUSTOM-PROP-%d", ii);
+					x_name = g_strdup_printf ("X-CUSTOM-PROP-%d", jj);
 					prop = i_cal_property_new_x (x_name + 2);
 					i_cal_property_set_x_name (prop, x_name);
 					g_free (x_name);
@@ -3837,7 +3836,7 @@ test_component_url (void)
 	const gchar *values[] = {
 		"https://www.gnome.org",
 		NULL,
-		"https://wiki.gnome.org/Apps/Evolution"
+		"https://gitlab.gnome.org/GNOME/evolution/-/wikis/home"
 	};
 	ECalComponent *comp;
 	gint ii;

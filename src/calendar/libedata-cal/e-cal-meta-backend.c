@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 2017 Red Hat, Inc. (www.redhat.com)
  *
@@ -37,6 +36,8 @@
 
 #include <glib.h>
 #include <glib/gi18n-lib.h>
+
+#include "camel/camel.h"
 
 #include "e-cal-backend-sexp.h"
 #include "e-cal-backend-sync.h"
@@ -1092,7 +1093,6 @@ ecmb_put_instances (ECalMetaBackend *meta_backend,
 	/* What left got removed from the remote side, notify about it */
 	if (success && cache_instances) {
 		ECalBackend *cal_backend = E_CAL_BACKEND (meta_backend);
-		GSList *link;
 
 		for (link = cache_instances; link && success; link = g_slist_next (link)) {
 			ECalComponent *comp = link->data;
@@ -1721,18 +1721,18 @@ ecmb_create_object_sync (ECalMetaBackend *meta_backend,
 
 	uid = i_cal_component_get_uid (icomp);
 	if (!uid) {
-		gchar *new_uid;
+		gchar *gen_uid;
 
-		new_uid = e_util_generate_uid ();
-		if (!new_uid) {
+		gen_uid = e_util_generate_uid ();
+		if (!gen_uid) {
 			g_propagate_error (error, e_cal_client_error_create (E_CAL_CLIENT_ERROR_INVALID_OBJECT, NULL));
 			return FALSE;
 		}
 
-		i_cal_component_set_uid (icomp, new_uid);
+		i_cal_component_set_uid (icomp, gen_uid);
 		uid = i_cal_component_get_uid (icomp);
 
-		g_free (new_uid);
+		g_free (gen_uid);
 	}
 
 	if (e_cal_cache_contains (cal_cache, uid, NULL, E_CACHE_EXCLUDE_DELETED)) {
@@ -2029,18 +2029,13 @@ ecmb_modify_object_sync (ECalMetaBackend *meta_backend,
 			master_dtstart = i_cal_component_get_dtstart (e_cal_component_get_icalcomponent (master_comp));
 			split_icomp = e_cal_util_split_at_instance_ex (icomp, rid, master_dtstart, e_cal_cache_resolve_timezone_cb, cal_cache);
 			if (split_icomp) {
-				ICalTime *rid_utc;
-
-				rid_utc = i_cal_time_convert_to_zone (rid, i_cal_timezone_get_utc_timezone ());
-				e_cal_util_remove_instances_ex (e_cal_component_get_icalcomponent (master_comp), rid_utc, mod, e_cal_cache_resolve_timezone_cb, cal_cache);
+				e_cal_util_remove_instances_ex (e_cal_component_get_icalcomponent (master_comp), rid, mod, e_cal_cache_resolve_timezone_cb, cal_cache);
 				e_cal_recur_ensure_end_dates (master_comp, TRUE, e_cal_cache_resolve_timezone_cb, cal_cache, cancellable, NULL);
 
 				if (out_new_comp) {
 					g_clear_object (&new_comp);
 					new_comp = e_cal_component_clone (master_comp);
 				}
-
-				g_object_unref (rid_utc);
 			}
 
 			if (split_icomp) {
@@ -2743,9 +2738,9 @@ ecmb_receive_objects_sync (ECalBackendSync *sync_backend,
 		top_method = I_CAL_METHOD_PUBLISH;
 
 	for (link = comps; link && success; link = g_slist_next (link)) {
-		ECalComponent *comp = link->data;
 		ICalPropertyMethod method;
 
+		comp = link->data;
 		subcomp = e_cal_component_get_icalcomponent (comp);
 
 		if (e_cal_util_component_has_property (subcomp, I_CAL_METHOD_PROPERTY)) {
@@ -4921,6 +4916,19 @@ e_cal_meta_backend_process_changes_sync (ECalMetaBackend *meta_backend,
 	return success;
 }
 
+static void
+e_cal_meta_backend_notify_status_cb (CamelOperation *opetarion,
+				     const gchar *what,
+				     gint percent,
+				     gpointer user_data)
+{
+	ECalBackend *cal_backend = user_data;
+
+	g_return_if_fail (E_IS_CAL_META_BACKEND (cal_backend));
+
+	e_cal_backend_foreach_view_notify_progress (cal_backend, FALSE, percent, what);
+}
+
 /**
  * e_cal_meta_backend_connect_sync:
  * @meta_backend: an #ECalMetaBackend
@@ -4972,6 +4980,9 @@ e_cal_meta_backend_connect_sync (ECalMetaBackend *meta_backend,
 				 GError **error)
 {
 	ECalMetaBackendClass *klass;
+	gboolean success;
+	gulong status_handler_id;
+	GCancellable *use_cancellable;
 
 	g_return_val_if_fail (E_IS_CAL_META_BACKEND (meta_backend), FALSE);
 
@@ -4979,7 +4990,18 @@ e_cal_meta_backend_connect_sync (ECalMetaBackend *meta_backend,
 	g_return_val_if_fail (klass != NULL, FALSE);
 	g_return_val_if_fail (klass->connect_sync != NULL, FALSE);
 
-	return klass->connect_sync (meta_backend, credentials, out_auth_result, out_certificate_pem, out_certificate_errors, cancellable, error);
+	use_cancellable = camel_operation_new_proxy (cancellable);
+	status_handler_id = g_signal_connect (use_cancellable, "status",
+		G_CALLBACK (e_cal_meta_backend_notify_status_cb), meta_backend);
+
+	success = klass->connect_sync (meta_backend, credentials, out_auth_result, out_certificate_pem, out_certificate_errors, use_cancellable, error);
+
+	if (status_handler_id)
+		g_signal_handler_disconnect (use_cancellable, status_handler_id);
+
+	g_clear_object (&use_cancellable);
+
+	return success;
 }
 
 /**
@@ -5005,6 +5027,9 @@ e_cal_meta_backend_disconnect_sync (ECalMetaBackend *meta_backend,
 				    GError **error)
 {
 	ECalMetaBackendClass *klass;
+	gboolean success;
+	gulong status_handler_id;
+	GCancellable *use_cancellable;
 
 	g_return_val_if_fail (E_IS_CAL_META_BACKEND (meta_backend), FALSE);
 
@@ -5012,7 +5037,18 @@ e_cal_meta_backend_disconnect_sync (ECalMetaBackend *meta_backend,
 	g_return_val_if_fail (klass != NULL, FALSE);
 	g_return_val_if_fail (klass->disconnect_sync != NULL, FALSE);
 
-	return klass->disconnect_sync (meta_backend, cancellable, error);
+	use_cancellable = camel_operation_new_proxy (cancellable);
+	status_handler_id = g_signal_connect (use_cancellable, "status",
+		G_CALLBACK (e_cal_meta_backend_notify_status_cb), meta_backend);
+
+	success = klass->disconnect_sync (meta_backend, use_cancellable, error);
+
+	if (status_handler_id)
+		g_signal_handler_disconnect (use_cancellable, status_handler_id);
+
+	g_clear_object (&use_cancellable);
+
+	return success;
 }
 
 /**
@@ -5080,6 +5116,8 @@ e_cal_meta_backend_get_changes_sync (ECalMetaBackend *meta_backend,
 	ECalMetaBackendClass *klass;
 	gint repeat_count = 0;
 	gboolean success = FALSE;
+	gulong status_handler_id;
+	GCancellable *use_cancellable;
 	GError *local_error = NULL;
 
 	g_return_val_if_fail (E_IS_CAL_META_BACKEND (meta_backend), FALSE);
@@ -5094,6 +5132,9 @@ e_cal_meta_backend_get_changes_sync (ECalMetaBackend *meta_backend,
 	g_return_val_if_fail (klass != NULL, FALSE);
 	g_return_val_if_fail (klass->get_changes_sync != NULL, FALSE);
 
+	use_cancellable = camel_operation_new_proxy (cancellable);
+	status_handler_id = g_signal_connect (use_cancellable, "status",
+		G_CALLBACK (e_cal_meta_backend_notify_status_cb), meta_backend);
 
 	while (!success && repeat_count <= MAX_REPEAT_COUNT) {
 		guint wait_credentials_stamp;
@@ -5113,12 +5154,17 @@ e_cal_meta_backend_get_changes_sync (ECalMetaBackend *meta_backend,
 			out_created_objects,
 			out_modified_objects,
 			out_removed_objects,
-			cancellable,
+			use_cancellable,
 			&local_error);
 
-		if (!success && repeat_count <= MAX_REPEAT_COUNT && !ecmb_maybe_wait_for_credentials (meta_backend, wait_credentials_stamp, local_error, cancellable))
+		if (!success && repeat_count <= MAX_REPEAT_COUNT && !ecmb_maybe_wait_for_credentials (meta_backend, wait_credentials_stamp, local_error, use_cancellable))
 			break;
 	}
+
+	if (status_handler_id)
+		g_signal_handler_disconnect (use_cancellable, status_handler_id);
+
+	g_clear_object (&use_cancellable);
 
 	if (local_error)
 		g_propagate_error (error, local_error);
@@ -5162,6 +5208,8 @@ e_cal_meta_backend_list_existing_sync (ECalMetaBackend *meta_backend,
 	ECalMetaBackendClass *klass;
 	gint repeat_count = 0;
 	gboolean success = FALSE;
+	gulong status_handler_id;
+	GCancellable *use_cancellable;
 	GError *local_error = NULL;
 
 	g_return_val_if_fail (E_IS_CAL_META_BACKEND (meta_backend), FALSE);
@@ -5171,6 +5219,9 @@ e_cal_meta_backend_list_existing_sync (ECalMetaBackend *meta_backend,
 	g_return_val_if_fail (klass != NULL, FALSE);
 	g_return_val_if_fail (klass->list_existing_sync != NULL, FALSE);
 
+	use_cancellable = camel_operation_new_proxy (cancellable);
+	status_handler_id = g_signal_connect (use_cancellable, "status",
+		G_CALLBACK (e_cal_meta_backend_notify_status_cb), meta_backend);
 
 	while (!success && repeat_count <= MAX_REPEAT_COUNT) {
 		guint wait_credentials_stamp;
@@ -5182,11 +5233,16 @@ e_cal_meta_backend_list_existing_sync (ECalMetaBackend *meta_backend,
 		g_clear_error (&local_error);
 		repeat_count++;
 
-		success = klass->list_existing_sync (meta_backend, out_new_sync_tag, out_existing_objects, cancellable, &local_error);
+		success = klass->list_existing_sync (meta_backend, out_new_sync_tag, out_existing_objects, use_cancellable, &local_error);
 
-		if (!success && repeat_count <= MAX_REPEAT_COUNT && !ecmb_maybe_wait_for_credentials (meta_backend, wait_credentials_stamp, local_error, cancellable))
+		if (!success && repeat_count <= MAX_REPEAT_COUNT && !ecmb_maybe_wait_for_credentials (meta_backend, wait_credentials_stamp, local_error, use_cancellable))
 			break;
 	}
+
+	if (status_handler_id)
+		g_signal_handler_disconnect (use_cancellable, status_handler_id);
+
+	g_clear_object (&use_cancellable);
 
 	if (local_error)
 		g_propagate_error (error, local_error);
@@ -5234,6 +5290,8 @@ e_cal_meta_backend_load_component_sync (ECalMetaBackend *meta_backend,
 	ECalMetaBackendClass *klass;
 	gint repeat_count = 0;
 	gboolean success = FALSE;
+	gulong status_handler_id;
+	GCancellable *use_cancellable;
 	GError *local_error = NULL;
 
 	g_return_val_if_fail (E_IS_CAL_META_BACKEND (meta_backend), FALSE);
@@ -5245,6 +5303,9 @@ e_cal_meta_backend_load_component_sync (ECalMetaBackend *meta_backend,
 	g_return_val_if_fail (klass != NULL, FALSE);
 	g_return_val_if_fail (klass->load_component_sync != NULL, FALSE);
 
+	use_cancellable = camel_operation_new_proxy (cancellable);
+	status_handler_id = g_signal_connect (use_cancellable, "status",
+		G_CALLBACK (e_cal_meta_backend_notify_status_cb), meta_backend);
 
 	while (!success && repeat_count <= MAX_REPEAT_COUNT) {
 		guint wait_credentials_stamp;
@@ -5256,11 +5317,16 @@ e_cal_meta_backend_load_component_sync (ECalMetaBackend *meta_backend,
 		g_clear_error (&local_error);
 		repeat_count++;
 
-		success = klass->load_component_sync (meta_backend, uid, extra, out_component, out_extra, cancellable, &local_error);
+		success = klass->load_component_sync (meta_backend, uid, extra, out_component, out_extra, use_cancellable, &local_error);
 
-		if (!success && repeat_count <= MAX_REPEAT_COUNT && !ecmb_maybe_wait_for_credentials (meta_backend, wait_credentials_stamp, local_error, cancellable))
+		if (!success && repeat_count <= MAX_REPEAT_COUNT && !ecmb_maybe_wait_for_credentials (meta_backend, wait_credentials_stamp, local_error, use_cancellable))
 			break;
 	}
+
+	if (status_handler_id)
+		g_signal_handler_disconnect (use_cancellable, status_handler_id);
+
+	g_clear_object (&use_cancellable);
 
 	if (local_error)
 		g_propagate_error (error, local_error);
@@ -5330,6 +5396,8 @@ e_cal_meta_backend_save_component_sync (ECalMetaBackend *meta_backend,
 	ECalMetaBackendClass *klass;
 	gint repeat_count = 0;
 	gboolean success = FALSE;
+	gulong status_handler_id;
+	GCancellable *use_cancellable;
 	GError *local_error = NULL;
 
 	g_return_val_if_fail (E_IS_CAL_META_BACKEND (meta_backend), FALSE);
@@ -5345,6 +5413,9 @@ e_cal_meta_backend_save_component_sync (ECalMetaBackend *meta_backend,
 		return FALSE;
 	}
 
+	use_cancellable = camel_operation_new_proxy (cancellable);
+	status_handler_id = g_signal_connect (use_cancellable, "status",
+		G_CALLBACK (e_cal_meta_backend_notify_status_cb), meta_backend);
 
 	while (!success && repeat_count <= MAX_REPEAT_COUNT) {
 		guint wait_credentials_stamp;
@@ -5364,12 +5435,17 @@ e_cal_meta_backend_save_component_sync (ECalMetaBackend *meta_backend,
 			opflags,
 			out_new_uid,
 			out_new_extra,
-			cancellable,
+			use_cancellable,
 			&local_error);
 
-		if (!success && repeat_count <= MAX_REPEAT_COUNT && !ecmb_maybe_wait_for_credentials (meta_backend, wait_credentials_stamp, local_error, cancellable))
+		if (!success && repeat_count <= MAX_REPEAT_COUNT && !ecmb_maybe_wait_for_credentials (meta_backend, wait_credentials_stamp, local_error, use_cancellable))
 			break;
 	}
+
+	if (status_handler_id)
+		g_signal_handler_disconnect (use_cancellable, status_handler_id);
+
+	g_clear_object (&use_cancellable);
 
 	if (local_error)
 		g_propagate_error (error, local_error);
@@ -5412,6 +5488,8 @@ e_cal_meta_backend_remove_component_sync (ECalMetaBackend *meta_backend,
 	ECalMetaBackendClass *klass;
 	gint repeat_count = 0;
 	gboolean success = FALSE;
+	gulong status_handler_id;
+	GCancellable *use_cancellable;
 	GError *local_error = NULL;
 
 	g_return_val_if_fail (E_IS_CAL_META_BACKEND (meta_backend), FALSE);
@@ -5425,6 +5503,10 @@ e_cal_meta_backend_remove_component_sync (ECalMetaBackend *meta_backend,
 		return FALSE;
 	}
 
+	use_cancellable = camel_operation_new_proxy (cancellable);
+	status_handler_id = g_signal_connect (use_cancellable, "status",
+		G_CALLBACK (e_cal_meta_backend_notify_status_cb), meta_backend);
+
 	while (!success && repeat_count <= MAX_REPEAT_COUNT) {
 		guint wait_credentials_stamp;
 
@@ -5435,11 +5517,16 @@ e_cal_meta_backend_remove_component_sync (ECalMetaBackend *meta_backend,
 		g_clear_error (&local_error);
 		repeat_count++;
 
-		success = klass->remove_component_sync (meta_backend, conflict_resolution, uid, extra, object, opflags, cancellable, &local_error);
+		success = klass->remove_component_sync (meta_backend, conflict_resolution, uid, extra, object, opflags, use_cancellable, &local_error);
 
-		if (!success && repeat_count <= MAX_REPEAT_COUNT && !ecmb_maybe_wait_for_credentials (meta_backend, wait_credentials_stamp, local_error, cancellable))
+		if (!success && repeat_count <= MAX_REPEAT_COUNT && !ecmb_maybe_wait_for_credentials (meta_backend, wait_credentials_stamp, local_error, use_cancellable))
 			break;
 	}
+
+	if (status_handler_id)
+		g_signal_handler_disconnect (use_cancellable, status_handler_id);
+
+	g_clear_object (&use_cancellable);
 
 	if (local_error)
 		g_propagate_error (error, local_error);
@@ -5479,6 +5566,9 @@ e_cal_meta_backend_search_sync (ECalMetaBackend *meta_backend,
 				GError **error)
 {
 	ECalMetaBackendClass *klass;
+	gboolean success;
+	gulong status_handler_id;
+	GCancellable *use_cancellable;
 
 	g_return_val_if_fail (E_IS_CAL_META_BACKEND (meta_backend), FALSE);
 	g_return_val_if_fail (out_icalstrings != NULL, FALSE);
@@ -5487,7 +5577,18 @@ e_cal_meta_backend_search_sync (ECalMetaBackend *meta_backend,
 	g_return_val_if_fail (klass != NULL, FALSE);
 	g_return_val_if_fail (klass->search_sync != NULL, FALSE);
 
-	return klass->search_sync (meta_backend, expr, out_icalstrings, cancellable, error);
+	use_cancellable = camel_operation_new_proxy (cancellable);
+	status_handler_id = g_signal_connect (use_cancellable, "status",
+		G_CALLBACK (e_cal_meta_backend_notify_status_cb), meta_backend);
+
+	success = klass->search_sync (meta_backend, expr, out_icalstrings, use_cancellable, error);
+
+	if (status_handler_id)
+		g_signal_handler_disconnect (use_cancellable, status_handler_id);
+
+	g_clear_object (&use_cancellable);
+
+	return success;
 }
 
 /**
@@ -5522,6 +5623,9 @@ e_cal_meta_backend_search_components_sync (ECalMetaBackend *meta_backend,
 					   GError **error)
 {
 	ECalMetaBackendClass *klass;
+	gboolean success;
+	gulong status_handler_id;
+	GCancellable *use_cancellable;
 
 	g_return_val_if_fail (E_IS_CAL_META_BACKEND (meta_backend), FALSE);
 	g_return_val_if_fail (out_components != NULL, FALSE);
@@ -5530,7 +5634,18 @@ e_cal_meta_backend_search_components_sync (ECalMetaBackend *meta_backend,
 	g_return_val_if_fail (klass != NULL, FALSE);
 	g_return_val_if_fail (klass->search_components_sync != NULL, FALSE);
 
-	return klass->search_components_sync (meta_backend, expr, out_components, cancellable, error);
+	use_cancellable = camel_operation_new_proxy (cancellable);
+	status_handler_id = g_signal_connect (use_cancellable, "status",
+		G_CALLBACK (e_cal_meta_backend_notify_status_cb), meta_backend);
+
+	success = klass->search_components_sync (meta_backend, expr, out_components, use_cancellable, error);
+
+	if (status_handler_id)
+		g_signal_handler_disconnect (use_cancellable, status_handler_id);
+
+	g_clear_object (&use_cancellable);
+
+	return success;
 }
 
 /**

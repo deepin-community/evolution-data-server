@@ -1,4 +1,4 @@
-libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
+libedataserver-1.2.so.27 libedataserver-1.2-27t64 #MINVER#
 * Build-Depends-Package: libedataserver1.2-dev
  (c++|regex|optional=template)"icu_[0-9]+::StringByteSink<.*@Base" 3.17.90
  __e_source_private_replace_dbus_object@Base 3.17
@@ -117,6 +117,50 @@ libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
  e_credentials_util_string_to_prompt_flags@Base 3.17
  e_data_server_util_get_dbus_call_timeout@Base 3.17
  e_data_server_util_set_dbus_call_timeout@Base 3.17
+ e_dbus_identity_broker1_call_acquire_prt_sso_cookie@Base 3.53.2
+ e_dbus_identity_broker1_call_acquire_prt_sso_cookie_finish@Base 3.53.2
+ e_dbus_identity_broker1_call_acquire_prt_sso_cookie_sync@Base 3.53.2
+ e_dbus_identity_broker1_call_acquire_token_interactively@Base 3.53.2
+ e_dbus_identity_broker1_call_acquire_token_interactively_finish@Base 3.53.2
+ e_dbus_identity_broker1_call_acquire_token_interactively_sync@Base 3.53.2
+ e_dbus_identity_broker1_call_acquire_token_silently@Base 3.53.2
+ e_dbus_identity_broker1_call_acquire_token_silently_finish@Base 3.53.2
+ e_dbus_identity_broker1_call_acquire_token_silently_sync@Base 3.53.2
+ e_dbus_identity_broker1_call_cancel_interactive_flow@Base 3.53.2
+ e_dbus_identity_broker1_call_cancel_interactive_flow_finish@Base 3.53.2
+ e_dbus_identity_broker1_call_cancel_interactive_flow_sync@Base 3.53.2
+ e_dbus_identity_broker1_call_generate_signed_http_request@Base 3.53.2
+ e_dbus_identity_broker1_call_generate_signed_http_request_finish@Base 3.53.2
+ e_dbus_identity_broker1_call_generate_signed_http_request_sync@Base 3.53.2
+ e_dbus_identity_broker1_call_get_accounts@Base 3.53.2
+ e_dbus_identity_broker1_call_get_accounts_finish@Base 3.53.2
+ e_dbus_identity_broker1_call_get_accounts_sync@Base 3.53.2
+ e_dbus_identity_broker1_call_get_linux_broker_version@Base 3.53.2
+ e_dbus_identity_broker1_call_get_linux_broker_version_finish@Base 3.53.2
+ e_dbus_identity_broker1_call_get_linux_broker_version_sync@Base 3.53.2
+ e_dbus_identity_broker1_call_remove_account@Base 3.53.2
+ e_dbus_identity_broker1_call_remove_account_finish@Base 3.53.2
+ e_dbus_identity_broker1_call_remove_account_sync@Base 3.53.2
+ e_dbus_identity_broker1_complete_acquire_prt_sso_cookie@Base 3.53.2
+ e_dbus_identity_broker1_complete_acquire_token_interactively@Base 3.53.2
+ e_dbus_identity_broker1_complete_acquire_token_silently@Base 3.53.2
+ e_dbus_identity_broker1_complete_cancel_interactive_flow@Base 3.53.2
+ e_dbus_identity_broker1_complete_generate_signed_http_request@Base 3.53.2
+ e_dbus_identity_broker1_complete_get_accounts@Base 3.53.2
+ e_dbus_identity_broker1_complete_get_linux_broker_version@Base 3.53.2
+ e_dbus_identity_broker1_complete_remove_account@Base 3.53.2
+ e_dbus_identity_broker1_get_type@Base 3.53.2
+ e_dbus_identity_broker1_interface_info@Base 3.53.2
+ e_dbus_identity_broker1_override_properties@Base 3.53.2
+ e_dbus_identity_broker1_proxy_get_type@Base 3.53.2
+ e_dbus_identity_broker1_proxy_new@Base 3.53.2
+ e_dbus_identity_broker1_proxy_new_finish@Base 3.53.2
+ e_dbus_identity_broker1_proxy_new_for_bus@Base 3.53.2
+ e_dbus_identity_broker1_proxy_new_for_bus_finish@Base 3.53.2
+ e_dbus_identity_broker1_proxy_new_for_bus_sync@Base 3.53.2
+ e_dbus_identity_broker1_proxy_new_sync@Base 3.53.2
+ e_dbus_identity_broker1_skeleton_get_type@Base 3.53.2
+ e_dbus_identity_broker1_skeleton_new@Base 3.53.2
  e_dbus_object_get_source@Base 3.17
  e_dbus_object_get_source_oauth2_support@Base 3.17
  e_dbus_object_get_source_remote_creatable@Base 3.17
@@ -459,6 +503,10 @@ libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
  e_module_load_all_in_directory_and_prefixes@Base 3.39.3
  e_module_load_file@Base 3.17
  e_module_new@Base 3.17
+ e_ms_oapxbc_acquire_prt_sso_cookie_sync@Base 3.53.2
+ e_ms_oapxbc_get_accounts_sync@Base 3.53.2
+ e_ms_oapxbc_get_type@Base 3.53.2
+ e_ms_oapxbc_new_sync@Base 3.53.2
  e_named_parameters_assign@Base 3.17
  e_named_parameters_clear@Base 3.17
  e_named_parameters_count@Base 3.16.3
@@ -484,6 +532,7 @@ libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
  e_oauth2_service_base_get_type@Base 3.27.90
  e_oauth2_service_can_process@Base 3.27.90
  e_oauth2_service_delete_token_sync@Base 3.27.90
+ e_oauth2_service_dup_credentials_prompter_cookies_sync@Base 3.53.2
  e_oauth2_service_extract_authorization_code@Base 3.27.90
  e_oauth2_service_extract_error_message@Base 3.47.2
  e_oauth2_service_get_access_token_sync@Base 3.27.90
@@ -561,6 +610,7 @@ libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
  e_soup_session_error_quark@Base 3.45.2
  e_soup_session_get_authentication_requires_credentials@Base 3.27.90
  e_soup_session_get_force_http1@Base 3.47.2
+ e_soup_session_get_handle_backoff_responses@Base 3.53.2
  e_soup_session_get_log_level@Base 3.25.90
  e_soup_session_get_source@Base 3.25.90
  e_soup_session_get_ssl_error_details@Base 3.25.90
@@ -576,6 +626,7 @@ libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
  e_soup_session_send_message_sync@Base 3.45.2
  e_soup_session_set_credentials@Base 3.25.90
  e_soup_session_set_force_http1@Base 3.47.2
+ e_soup_session_set_handle_backoff_responses@Base 3.53.2
  e_soup_session_setup_logging@Base 3.25.90
  e_soup_session_util_get_force_http1_supported@Base 3.47.2
  e_soup_session_util_get_message_bytes@Base 3.45.2
@@ -589,9 +640,11 @@ libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
  e_source_address_book_get_type@Base 3.17
  e_source_address_book_set_order@Base 3.39.2
  e_source_alarms_dup_last_notified@Base 3.17
+ e_source_alarms_get_for_every_event@Base 3.51.2
  e_source_alarms_get_include_me@Base 3.17
  e_source_alarms_get_last_notified@Base 3.17
  e_source_alarms_get_type@Base 3.17
+ e_source_alarms_set_for_every_event@Base 3.51.2
  e_source_alarms_set_include_me@Base 3.17
  e_source_alarms_set_last_notified@Base 3.17
  e_source_authentication_dup_credential_name@Base 3.17
@@ -876,6 +929,7 @@ libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
  e_source_openpgp_dup_key_id@Base 3.17
  e_source_openpgp_dup_signing_algorithm@Base 3.17
  e_source_openpgp_get_always_trust@Base 3.17
+ e_source_openpgp_get_ask_send_public_key@Base 3.51.2
  e_source_openpgp_get_encrypt_by_default@Base 3.17.90
  e_source_openpgp_get_encrypt_to_self@Base 3.17
  e_source_openpgp_get_key_id@Base 3.17
@@ -887,6 +941,7 @@ libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
  e_source_openpgp_get_signing_algorithm@Base 3.17
  e_source_openpgp_get_type@Base 3.17
  e_source_openpgp_set_always_trust@Base 3.17
+ e_source_openpgp_set_ask_send_public_key@Base 3.51.2
  e_source_openpgp_set_encrypt_by_default@Base 3.17.90
  e_source_openpgp_set_encrypt_to_self@Base 3.17
  e_source_openpgp_set_key_id@Base 3.17
@@ -1085,6 +1140,7 @@ libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
  e_source_webdav_get_resource_query@Base 3.17
  e_source_webdav_get_ssl_trust@Base 3.17
  e_source_webdav_get_ssl_trust_response@Base 3.32.0
+ e_source_webdav_get_timeout@Base 3.53.2
  e_source_webdav_get_type@Base 3.17
  e_source_webdav_notes_dup_default_ext@Base 3.43.2
  e_source_webdav_notes_get_default_ext@Base 3.43.2
@@ -1100,6 +1156,7 @@ libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
  e_source_webdav_set_resource_query@Base 3.17
  e_source_webdav_set_ssl_trust@Base 3.17
  e_source_webdav_set_ssl_trust_response@Base 3.32.0
+ e_source_webdav_set_timeout@Base 3.53.2
  e_source_webdav_set_uri@Base 3.45.2
  e_source_webdav_unset_temporary_ssl_trust@Base 3.17
  e_source_webdav_update_ssl_trust@Base 3.17
@@ -1148,6 +1205,7 @@ libedataserver-1.2.so.27 libedataserver-1.2-27 #MINVER#
  e_util_get_source_full_name@Base 3.17.90
  e_util_gthread_id@Base 3.17
  e_util_guess_source_is_readonly@Base 3.50.0
+ e_util_host_is_in_domain@Base 3.53.2
  e_util_identity_can_send@Base 3.25.90
  e_util_safe_free_string@Base 3.17
  e_util_slist_to_strv@Base 3.17

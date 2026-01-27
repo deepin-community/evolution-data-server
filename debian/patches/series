@@ -1,2 +1,4 @@
 01-noinst-libedbus-private.patch
 ubuntu_gettext_domain.patch
+docs-Update-URL-to-libsoup-docs.patch
+I-605-Camel-MH-account-busy-loops-when-reading-directory-.patch

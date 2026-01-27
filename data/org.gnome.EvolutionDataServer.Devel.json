@@ -3,16 +3,9 @@
 	"runtime": "org.gnome.Platform",
 	"runtime-version": "master",
 	"sdk": "org.gnome.Sdk",
-	"sdk-extensions" : [
-		"org.freedesktop.Sdk.Extension.vala"
-	],
 	"branch": "master",
 	"command": "/usr/libexec/evolution-source-registry",
 	"tags": [ "devel" ],
-	"build-options" : {
-		"prepend-path" : "/usr/lib/sdk/vala/bin/",
-		"prepend-ld-library-path" : "/usr/lib/sdk/vala/lib"
-	},
 	"cleanup": [
 		"*.la",
 		"*.a"
@@ -70,9 +63,81 @@
 			],
 			"sources": [
 				{
-					"type": "git",
-					"url": "git://git.0pointer.net/libcanberra.git",
-					"branch": "master"
+					"type": "archive",
+					"url": "http://0pointer.de/lennart/projects/libcanberra/libcanberra-0.30.tar.xz",
+					"sha256": "c2b671e67e0c288a69fc33dc1b6f1b534d07882c2aceed37004bf48c601afa72"
+				},
+				{
+					"type": "script",
+					"dest-filename": "libcanberra-x11-check.patch",
+					"commands": [
+						"From c0620e432650e81062c1967cc669829dbd29b310 Mon Sep 17 00:00:00 2001",
+						"Subject: gtk: Don't assume all GdkDisplays are GdkX11Displays: broadway/wayland",
+						"",
+						"diff --git a/src/canberra-gtk-module.c b/src/canberra-gtk-module.c",
+						"index 67791f0..c1532ab 100644",
+						"--- a/src/canberra-gtk-module.c",
+						"+++ b/src/canberra-gtk-module.c",
+						"@@ -307,6 +307,11 @@ static gint window_get_desktop(GdkDisplay *d, GdkWindow *w) {",
+						"         guchar *data = NULL;",
+						"         gint ret = -1;",
+						" ",
+						"+#ifdef GDK_IS_X11_DISPLAY",
+						"+        if (!GDK_IS_X11_DISPLAY(d))",
+						"+                return 0;",
+						"+#endif",
+						"+",
+						"         if (XGetWindowProperty(GDK_DISPLAY_XDISPLAY(d), GDK_WINDOW_XID(w),",
+						"                                gdk_x11_get_xatom_by_name_for_display(d, \"_NET_WM_DESKTOP\"),",
+						"                                0, G_MAXLONG, False, XA_CARDINAL, &type_return,",
+						"@@ -335,6 +340,11 @@ static gint display_get_desktop(GdkDisplay *d) {",
+						"         guchar *data = NULL;",
+						"         gint ret = -1;",
+						" ",
+						"+#ifdef GDK_IS_X11_DISPLAY",
+						"+        if (!GDK_IS_X11_DISPLAY(d))",
+						"+                return 0;",
+						"+#endif",
+						"+",
+						"         if (XGetWindowProperty(GDK_DISPLAY_XDISPLAY(d), DefaultRootWindow(GDK_DISPLAY_XDISPLAY(d)),",
+						"                                gdk_x11_get_xatom_by_name_for_display(d, \"_NET_CURRENT_DESKTOP\"),",
+						"                                0, G_MAXLONG, False, XA_CARDINAL, &type_return,",
+						"@@ -365,6 +375,11 @@ static gboolean window_is_xembed(GdkDisplay *d, GdkWindow *w) {",
+						"         gboolean ret = FALSE;",
+						"         Atom xembed;",
+						" ",
+						"+#ifdef GDK_IS_X11_DISPLAY",
+						"+        if (!GDK_IS_X11_DISPLAY(d))",
+						"+                return FALSE;",
+						"+#endif",
+						"+",
+						"         /* Gnome Panel applets are XEMBED windows. We need to make sure we",
+						"          * ignore them */",
+						" ",
+						"diff --git a/src/canberra-gtk.c b/src/canberra-gtk.c",
+						"index 34446f5..08cb668 100644",
+						"--- a/src/canberra-gtk.c",
+						"+++ b/src/canberra-gtk.c",
+						"@@ -185,6 +185,11 @@ static gint window_get_desktop(GdkDisplay *d, GdkWindow *w) {",
+						"         guchar *data = NULL;",
+						"         gint ret = -1;",
+						" ",
+						"+#ifdef GDK_IS_X11_DISPLAY",
+						"+        if (!GDK_IS_X11_DISPLAY(d))",
+						"+                return 0;",
+						"+#endif",
+						"+",
+						"         if (XGetWindowProperty(GDK_DISPLAY_XDISPLAY(d), GDK_WINDOW_XID(w),",
+						"                                gdk_x11_get_xatom_by_name_for_display(d, \"_NET_WM_DESKTOP\"),",
+						"                                0, G_MAXLONG, False, XA_CARDINAL, &type_return,",
+						""
+					]
+				},
+				{
+					"type": "shell",
+					"commands": [
+						"patch -p1 <libcanberra-x11-check.patch"
+					]
 				}
 			]
 		},
@@ -215,8 +280,8 @@
 			"sources": [
 				{
 					"type": "archive",
-					"url": "https://www.openldap.org/software/download/OpenLDAP/openldap-release/openldap-2.6.2.tgz",
-					"sha256": "81d09345232eb62486ecf5acacd2c56c0c45b4a6c8c066612e7f421a23a1cf87"
+					"url": "https://www.openldap.org/software/download/OpenLDAP/openldap-release/openldap-2.6.8.tgz",
+					"sha256": "48969323e94e3be3b03c6a132942dcba7ef8d545f2ad35401709019f696c3c4e"
 				},
 
 				{
@@ -279,7 +344,6 @@
 			"config-opts": [
 				"-DDBUS_SERVICES_PREFIX=org.gnome.EvolutionDataServer.Devel",
 				"-DEXTENSIONS_DIR=/app/evolution/extensions",
-				"-DENABLE_MAINTAINER_MODE=ON",
 				"-DENABLE_FILE_LOCKING=fcntl",
 				"-DENABLE_DOT_LOCKING=OFF",
 				"-DENABLE_GTK=ON",
@@ -300,13 +364,9 @@
 				{
 					"type": "git",
 					"url": "https://gitlab.gnome.org/GNOME/evolution-data-server.git",
-					"branch": "master"
+					"branch": "gnome-48"
 				}
-			],
-			"post-install": [
-				"ctest --force-new-ctest-process --output-on-failure"
 			]
-
 		}
 	]
 }

@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * SPDX-FileCopyrightText: (C) 2023 Red Hat (www.redhat.com)
  * SPDX-License-Identifier: LGPL-2.1-or-later
@@ -398,7 +397,7 @@ data_book_view_watcher_cache_dispose (GObject *object)
 
 		if (self->priv->signal_objects_removed_id) {
 			g_signal_handler_disconnect (view, self->priv->signal_objects_removed_id);
-			self->priv->signal_objects_modified_id = 0;
+			self->priv->signal_objects_removed_id = 0;
 		}
 
 		g_object_unref (view);

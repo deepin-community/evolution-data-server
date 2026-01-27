@@ -10,10 +10,10 @@ Applied-upstream: no, rejected upstream
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 1872801..cb13b88 100644
+index 8cac10e..1d1f936 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -22,7 +22,7 @@ set(API_VERSION 1.2)
+@@ -21,7 +21,7 @@ set(API_VERSION 1.2)
  set(CAL_API_VERSION 2.0)
  
  # Required for FindIntltool module

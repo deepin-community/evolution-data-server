@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /* camel-pop3-folder.c : class for a pop3 folder
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -643,7 +642,6 @@ pop3_folder_refresh_info_sync (CamelFolder *folder,
 
 	/* Get rid of the old cache */
 	if (pop3_folder->uids) {
-		gint i;
 		CamelPOP3FolderInfo *last_fi;
 
 		if (pop3_folder->uids->len) {

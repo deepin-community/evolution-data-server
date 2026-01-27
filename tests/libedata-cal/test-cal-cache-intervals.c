@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * This program is free software: you can redistribute it and/or modify it
  * under the terms of the GNU Lesser General Public License as published by
@@ -291,7 +290,6 @@ test_intervals (TCUFixture *fixture,
 		GSList *next = l1->next;
 
 		if (g_rand_double (myrand) < DELETE_PROBABILITY) {
-			ECalComponent *comp;
 			ECalComponentId *id;
 
 			interval = l1->data;

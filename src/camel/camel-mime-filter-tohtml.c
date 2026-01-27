@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -70,6 +69,7 @@ static struct {
 	{ CONVERT_WEB_URLS, { "nntp://",   "",        camel_url_web_start,      camel_url_web_end      } },
 	{ CONVERT_WEB_URLS, { "telnet://", "",        camel_url_web_start,      camel_url_web_end      } },
 	{ CONVERT_WEB_URLS, { "webcal://", "",        camel_url_web_start,      camel_url_web_end      } },
+	{ CONVERT_WEB_URLS, { "webcals://","",        camel_url_web_start,      camel_url_web_end      } },
 	{ CONVERT_WEB_URLS, { "mailto:",   "",        camel_url_web_start,      camel_url_web_end      } },
 	{ CONVERT_WEB_URLS, { "callto:",   "",        camel_url_web_start,      camel_url_web_end      } },
 	{ CONVERT_WEB_URLS, { "h323:",     "",        camel_url_web_start,      camel_url_web_end      } },

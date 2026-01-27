@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -137,7 +136,7 @@ camel_url_scanner_scan (CamelUrlScanner *scanner,
 }
 
 /* stephenhay from https://mathiasbynens.be/demo/url-regex */
-#define URL_PROTOCOLS "news|telnet|nntp|file|https?|s?ftp|webcal|localhost|ssh"
+#define URL_PROTOCOLS "news|telnet|nntp|file|https?|s?ftp|webcals?|localhost|ssh"
 #define URL_PATTERN "((?:(?:(?:" URL_PROTOCOLS ")\\:\\/\\/)|(?:www\\.|ftp\\.))[^\\s\\/\\$\\.\\?#].[^\\s]*+)"
 
 #define FILE_PATTERN "((?:(?:(?:file)\\:\\/\\/)|(?:(?:file)\\:\\/\\/\\/))[^\\s\\/\\$\\.\\?#].[^\\s]*+)"

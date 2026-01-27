@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -86,6 +85,8 @@ void camel_smime_context_set_encrypt_key (CamelSMIMEContext *context, gboolean u
 void camel_smime_context_set_sign_mode (CamelSMIMEContext *context, CamelSMIMESign type);
 
 guint32 camel_smime_context_describe_part (CamelSMIMEContext *context, struct _CamelMimePart *part);
+
+const gchar *camel_smime_context_util_nss_error_to_string (gint nss_error_code);
 
 G_END_DECLS
 

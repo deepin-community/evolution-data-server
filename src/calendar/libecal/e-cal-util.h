@@ -249,12 +249,21 @@ G_BEGIN_DECLS
  * E_CAL_STATIC_CAPABILITY_RETRACT_SUPPORTED:
  *
  * Set, when the backend supports retract. That's a way to ask for a meeting
- * deletion with a comment, which is stored in a component as
- * X-EVOLUTION-RETRACT-COMMENT property.
+ * deletion with a comment, which is stored in a component as the COMMENT property.
  *
  * Since: 3.50
  **/
 #define E_CAL_STATIC_CAPABILITY_RETRACT_SUPPORTED "retract-supported"
+
+/**
+ * E_CAL_STATIC_CAPABILITY_USER_IS_ORGANIZER_ONLY:
+ *
+ * Set, when the backend can save meetings only if the organizer is
+ * the calendar user.
+ *
+ * Since: 3.56
+ **/
+#define E_CAL_STATIC_CAPABILITY_USER_IS_ORGANIZER_ONLY "user-is-organizer-only"
 
 struct _ECalClient;
 
@@ -300,6 +309,7 @@ ECalComponentAlarms *
 						 ECalRecurResolveTimezoneCb resolve_tzid,
 						 gpointer user_data,
 						 ICalTimezone *default_timezone,
+						 gint def_reminder_before_start_seconds,
 						 GCancellable *cancellable,
 						 GError **error);
 const gchar *	e_cal_util_priority_to_string	(gint priority);
@@ -421,6 +431,26 @@ void		e_cal_util_clamp_vtimezone	(ICalComponent *vtimezone,
 void		e_cal_util_clamp_vtimezone_by_component
 						(ICalComponent *vtimezone,
 						 ICalComponent *component);
+/**
+ * ECalUtilFilterPropertyFunc:
+ * @prop: an #ICalProperty
+ * @user_data: user data for the function
+ *
+ * Function used to determine whether the given property @prop
+ * should be considered.
+ *
+ * Returns: %TRUE, when the @prop should be considered, %FALSE to skip it
+ *
+ * Since: 3.52
+ **/
+typedef gboolean (* ECalUtilFilterPropertyFunc)	(ICalProperty *prop,
+						 gpointer user_data);
+ICalProperty *	e_cal_util_component_find_property_for_locale_filtered
+						(ICalComponent *icalcomp,
+						 ICalPropertyKind prop_kind,
+						 const gchar *locale,
+						 ECalUtilFilterPropertyFunc func,
+						 gpointer user_data);
 ICalProperty *	e_cal_util_component_find_property_for_locale
 						(ICalComponent *icalcomp,
 						 ICalPropertyKind prop_kind,

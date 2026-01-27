@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 2018 Red Hat, Inc. (www.redhat.com)
  *
@@ -103,8 +102,6 @@ book_utils_get_recipient_certificates_thread (gpointer data,
 
 		if (client && e_book_client_get_contacts_sync (client, sexp->str, &contacts, rcd->cancellable, NULL) && contacts) {
 			GSList *link;
-			GHashTableIter iter;
-			gpointer value;
 			gboolean all_done;
 
 			g_mutex_lock (&rcd->lock);
@@ -145,7 +142,7 @@ book_utils_get_recipient_certificates_thread (gpointer data,
 											gboolean usable;
 
 											nss_cert = CERT_DecodeCertFromPackage (decoded->str, decoded->len);
-											usable = nss_cert && (nss_cert->keyUsage & certificateUsageEmailRecipient) != 0;
+											usable = nss_cert && (nss_cert->keyUsage & (KU_KEY_ENCIPHERMENT | KU_DATA_ENCIPHERMENT)) != 0;
 											if (nss_cert)
 												CERT_DestroyCertificate (nss_cert);
 

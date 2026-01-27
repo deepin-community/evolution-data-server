@@ -1,6 +1,7 @@
 add_pkgconfig_file(libedata-cal.pc.in libedata-cal-${CAL_API_VERSION}.pc)
 
 set(DEPENDENCIES
+	camel
 	ebackend
 	ecal
 	edbus-private
@@ -11,6 +12,7 @@ set(SOURCES
 	e-cal-backend.c
 	e-cal-backend-factory.c
 	e-cal-backend-intervaltree.c
+	e-cal-backend-private.h
 	e-cal-backend-sexp.c
 	e-cal-backend-sync.c
 	e-cal-backend-util.c

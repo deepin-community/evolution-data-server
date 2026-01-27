@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 2018 Red Hat, Inc. (www.redhat.com)
  *
@@ -325,6 +324,7 @@ e_oauth2_service_default_init (EOAuth2ServiceInterface *iface)
 	iface->prepare_refresh_token_message = eos_default_prepare_refresh_token_message;
 	iface->extract_authorization_code = eos_default_extract_authorization_code;
 	iface->extract_error_message = eos_default_extract_error_message;
+	iface->dup_credentials_prompter_cookies_sync = NULL;
 }
 
 /**
@@ -931,6 +931,39 @@ e_oauth2_service_prepare_refresh_token_message (EOAuth2Service *service,
 	g_return_if_fail (iface->prepare_refresh_token_message != NULL);
 
 	iface->prepare_refresh_token_message (service, source, message);
+}
+
+/**
+ * e_oauth2_service_dup_credentials_prompter_cookies_sync:
+ * @service: an #EOAuth2Service
+ * @source: an associated #ESource
+ * @cancellable: a #GCancellable
+ *
+ * Additional cookies to be used in the prompt dialog when asking for the user
+ * credentials. The default implementation does not provide any cookies.
+ *
+ * Returns: (nullable) (element-type SoupCookie) (transfer full): a #GSList of #SoupCookie-s to use, or %NULL
+ *
+ * Since: 3.54
+ **/
+GSList *
+e_oauth2_service_dup_credentials_prompter_cookies_sync (EOAuth2Service *service,
+							ESource *source,
+							GCancellable *cancellable)
+{
+	EOAuth2ServiceInterface *iface;
+
+	g_return_val_if_fail (E_IS_OAUTH2_SERVICE (service), NULL);
+	g_return_val_if_fail (E_IS_SOURCE (source), NULL);
+
+	iface = E_OAUTH2_SERVICE_GET_INTERFACE (service);
+	g_return_val_if_fail (iface != NULL, NULL);
+
+	if (!iface->dup_credentials_prompter_cookies_sync) {
+		return NULL;
+	}
+
+	return iface->dup_credentials_prompter_cookies_sync (service, source, cancellable);
 }
 
 static SoupSession *
@@ -2162,6 +2195,37 @@ e_oauth2_service_util_compile_value (const gchar *compile_value,
 gint
 main (void)
 {
+	#if defined(DECODE_KEY) && defined(DECODE_TO_FILE)
+	static gchar buff[128] = { 0, };
+	const gchar *processed;
+	GError *error = NULL;
+
+	processed = e_oauth2_service_util_compile_value (DECODE_KEY, buff, sizeof (buff));
+	#ifdef DECODE_REVERSED
+	{
+		gchar **strv = g_strsplit (processed, ".", -1);
+		gchar *joined;
+		guint ii, end = g_strv_length (strv) - 1;
+
+		for (ii = 0; ii < end; ii++, end--) {
+			gchar *tmp = strv[ii];
+			strv[ii] = strv[end];
+			strv[end] = tmp;
+		}
+
+		joined = g_strjoinv (".", strv);
+		strcpy (buff, joined);
+		g_strfreev (strv);
+		g_free (joined);
+
+		processed = buff;
+	}
+	#endif
+	if (!g_file_set_contents (DECODE_TO_FILE, processed, strlen (processed), &error))
+		g_warning ("Failed to save to '%s': %s", DECODE_TO_FILE, error ? error->message : "Unknown error");
+	g_clear_error (&error);
+
+	#else
 	gchar chr;
 	GString *str;
 
@@ -2231,6 +2295,7 @@ main (void)
 	}
 
 	g_string_free (str, TRUE);
+	#endif
 
 	return 0;
 }

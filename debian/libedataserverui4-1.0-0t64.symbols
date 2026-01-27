@@ -1,5 +1,5 @@
-libedataserverui-1.2.so.4 libedataserverui-1.2-4 #MINVER#
-* Build-Depends-Package: libedataserverui1.2-dev
+libedataserverui4-1.0.so.0 libedataserverui4-1.0-0t64 #MINVER#
+* Build-Depends-Package: libedataserverui4-dev
  _libedataserverui_box_pack_start@Base 3.45.2
  _libedataserverui_dialog_run@Base 3.45.2
  _libedataserverui_entry_get_text@Base 3.45.2
@@ -15,7 +15,6 @@ libedataserverui-1.2.so.4 libedataserverui-1.2-4 #MINVER#
  e_certificate_widget_new@Base 3.45.3
  e_certificate_widget_set_der@Base 3.45.3
  e_certificate_widget_set_pem@Base 3.45.3
- e_credentials_prompter_complete_prompt_call@Base 3.16.2
  e_credentials_prompter_get_auto_prompt@Base 3.16.2
  e_credentials_prompter_get_auto_prompt_disabled_for@Base 3.16.2
  e_credentials_prompter_get_dialog_parent@Base 3.16.2
@@ -42,6 +41,22 @@ libedataserverui-1.2.so.4 libedataserverui-1.2-4 #MINVER#
  e_credentials_prompter_set_auto_prompt@Base 3.16.2
  e_credentials_prompter_set_auto_prompt_disabled_for@Base 3.16.2
  e_credentials_prompter_unregister_impl@Base 3.16.2
+ e_dbus_oauth2_response_call_response_uri@Base 3.50.2
+ e_dbus_oauth2_response_call_response_uri_finish@Base 3.50.2
+ e_dbus_oauth2_response_call_response_uri_sync@Base 3.50.2
+ e_dbus_oauth2_response_complete_response_uri@Base 3.50.2
+ e_dbus_oauth2_response_get_type@Base 3.50.2
+ e_dbus_oauth2_response_interface_info@Base 3.50.2
+ e_dbus_oauth2_response_override_properties@Base 3.50.2
+ e_dbus_oauth2_response_proxy_get_type@Base 3.50.2
+ e_dbus_oauth2_response_proxy_new@Base 3.50.2
+ e_dbus_oauth2_response_proxy_new_finish@Base 3.50.2
+ e_dbus_oauth2_response_proxy_new_for_bus@Base 3.50.2
+ e_dbus_oauth2_response_proxy_new_for_bus_finish@Base 3.50.2
+ e_dbus_oauth2_response_proxy_new_for_bus_sync@Base 3.50.2
+ e_dbus_oauth2_response_proxy_new_sync@Base 3.50.2
+ e_dbus_oauth2_response_skeleton_get_type@Base 3.50.2
+ e_dbus_oauth2_response_skeleton_new@Base 3.50.2
  e_reminders_widget_get_paned@Base 3.37.90
  e_reminders_widget_get_settings@Base 3.29.90
  e_reminders_widget_get_tree_view@Base 3.29.90

@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8; fill-column: 160 -*- */
 /* camel-mime-message.c : class for a mime_message
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -145,9 +144,13 @@ process_header (CamelMedium *medium,
 		} else
 			charset = NULL;
 
-		unfolded = camel_header_unfold (value);
-		message->priv->subject = g_strstrip (camel_header_decode_string (unfolded, charset));
-		g_free (unfolded);
+		if (value) {
+			unfolded = camel_header_unfold (value);
+			message->priv->subject = g_strstrip (camel_header_decode_string (unfolded, charset));
+			g_free (unfolded);
+		} else {
+			message->priv->subject = NULL;
+		}
 		break;
 	case HEADER_TO:
 	case HEADER_CC:

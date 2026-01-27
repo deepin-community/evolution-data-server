@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /* camel-imap-store.h : class for an imap store
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -83,6 +82,11 @@ gboolean	camel_imapx_store_is_gmail_server
 gboolean	camel_imapx_store_get_bodystructure_enabled
 						(CamelIMAPXStore *store);
 void		camel_imapx_store_set_bodystructure_enabled
+						(CamelIMAPXStore *store,
+						 gboolean enabled);
+gboolean	camel_imapx_store_get_preview_enabled
+						(CamelIMAPXStore *store);
+void		camel_imapx_store_set_preview_enabled
 						(CamelIMAPXStore *store,
 						 gboolean enabled);
 CamelIMAPXConnManager *

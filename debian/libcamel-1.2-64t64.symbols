@@ -1,4 +1,4 @@
-libcamel-1.2.so.64 libcamel-1.2-64 #MINVER#
+libcamel-1.2.so.64 libcamel-1.2-64t64 #MINVER#
 * Build-Depends-Package: libcamel1.2-dev
  _camel_message_info_unset_summary@Base 3.24.3
  _camel_utils_initialize@Base 3.41.3
@@ -531,6 +531,7 @@ libcamel-1.2.so.64 libcamel-1.2-64 #MINVER#
  camel_header_unfold@Base 3.19.92
  camel_headers_dup_mailing_list@Base 3.24.1
  camel_host_idna_to_ascii@Base 3.19.92
+ camel_hostname_utils_host_is_in_domain@Base 3.53.2
  camel_hostname_utils_requires_ascii@Base 3.42.1
  camel_html_parser_attr@Base 3.19.92
  camel_html_parser_attr_list@Base 3.19.92
@@ -686,6 +687,7 @@ libcamel-1.2.so.64 libcamel-1.2-64 #MINVER#
  camel_message_info_load@Base 3.24.1
  camel_message_info_new@Base 3.19.92
  camel_message_info_new_from_headers@Base 3.24.1
+ camel_message_info_new_from_message@Base 3.52.3
  camel_message_info_pooldup_uid@Base 3.24.1
  camel_message_info_property_lock@Base 3.24.1
  camel_message_info_property_unlock@Base 3.24.1
@@ -742,6 +744,7 @@ libcamel-1.2.so.64 libcamel-1.2-64 #MINVER#
  camel_mime_filter_filter@Base 3.19.92
  camel_mime_filter_from_get_type@Base 3.19.92
  camel_mime_filter_from_new@Base 3.19.92
+ camel_mime_filter_get_request_stop@Base 3.51.2
  camel_mime_filter_get_type@Base 3.19.92
  camel_mime_filter_gzip_get_type@Base 3.19.92
  camel_mime_filter_gzip_mode_get_type@Base 3.19.92
@@ -757,9 +760,15 @@ libcamel-1.2.so.64 libcamel-1.2-64 #MINVER#
  camel_mime_filter_new@Base 3.19.92
  camel_mime_filter_pgp_get_type@Base 3.19.92
  camel_mime_filter_pgp_new@Base 3.19.92
+ camel_mime_filter_preview_get_limit@Base 3.51.2
+ camel_mime_filter_preview_get_text@Base 3.51.2
+ camel_mime_filter_preview_get_type@Base 3.51.2
+ camel_mime_filter_preview_new@Base 3.51.2
+ camel_mime_filter_preview_set_limit@Base 3.51.2
  camel_mime_filter_progress_get_type@Base 3.19.92
  camel_mime_filter_progress_new@Base 3.19.92
  camel_mime_filter_reset@Base 3.19.92
+ camel_mime_filter_set_request_stop@Base 3.51.2
  camel_mime_filter_set_size@Base 3.19.92
  camel_mime_filter_to_html_flags_get_type@Base 3.19.92
  camel_mime_filter_tohtml_get_type@Base 3.19.92
@@ -833,6 +842,7 @@ libcamel-1.2.so.64 libcamel-1.2-64 #MINVER#
  camel_mime_part_construct_from_parser@Base 3.19.92
  camel_mime_part_construct_from_parser_finish@Base 3.19.92
  camel_mime_part_construct_from_parser_sync@Base 3.19.92
+ camel_mime_part_generate_preview@Base 3.51.2
  camel_mime_part_get_content_disposition@Base 3.19.92
  camel_mime_part_get_content_id@Base 3.19.92
  camel_mime_part_get_content_languages@Base 3.19.92
@@ -871,6 +881,7 @@ libcamel-1.2.so.64 libcamel-1.2-64 #MINVER#
  camel_multipart_construct_from_parser@Base 3.19.92
  camel_multipart_encrypted_get_type@Base 3.19.92
  camel_multipart_encrypted_new@Base 3.19.92
+ camel_multipart_generate_preview@Base 3.51.2
  camel_multipart_get_boundary@Base 3.19.92
  camel_multipart_get_number@Base 3.19.92
  camel_multipart_get_part@Base 3.19.92
@@ -995,6 +1006,7 @@ libcamel-1.2.so.64 libcamel-1.2-64 #MINVER#
  camel_offline_store_set_online_finish@Base 3.25.90
  camel_offline_store_set_online_sync@Base 3.19.92
  camel_operation_cancel_all@Base 3.19.92
+ camel_operation_dup_message@Base 3.51.2
  camel_operation_get_type@Base 3.19.92
  camel_operation_new@Base 3.19.92
  camel_operation_new_proxy@Base 3.24.1
@@ -1189,6 +1201,7 @@ libcamel-1.2.so.64 libcamel-1.2-64 #MINVER#
  camel_smime_context_new@Base 3.19.92
  camel_smime_context_set_encrypt_key@Base 3.19.92
  camel_smime_context_set_sign_mode@Base 3.19.92
+ camel_smime_context_util_nss_error_to_string@Base 3.51.2
  camel_sort_type_get_type@Base 3.19.92
  camel_store_can_refresh_folder@Base 3.19.92
  camel_store_create_folder@Base 3.19.92

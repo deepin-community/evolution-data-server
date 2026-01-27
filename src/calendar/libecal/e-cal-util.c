@@ -380,6 +380,12 @@ compute_alarm_range (ECalComponent *comp,
 	}
 
 	*alarm_start -= repeat_time;
+
+	if (*alarm_start < 0)
+		*alarm_start = 0;
+	if (*alarm_end < 0)
+		*alarm_end = 0;
+
 	g_warn_if_fail (*alarm_start <= *alarm_end);
 }
 
@@ -392,6 +398,7 @@ struct alarm_occurrence_data {
 	time_t start;
 	time_t end;
 	ECalComponentAlarmAction *omit;
+	gint def_reminder_before_start_seconds;
 	gboolean only_check;
 	gboolean any_exists;
 
@@ -425,6 +432,65 @@ add_trigger (struct alarm_occurrence_data *aod,
 	aod->triggers = g_slist_prepend (aod->triggers, instance);
 }
 
+static void
+e_cal_util_add_alarm_before_start (ECalComponent *comp,
+				   gint before_start_seconds)
+{
+	ECalComponentAlarm *alarm;
+	ECalComponentAlarmTrigger *trigger;
+	ECalComponentText *summary;
+	ICalDuration *duration;
+	GSList *alarms, *link;
+
+	g_return_if_fail (E_IS_CAL_COMPONENT (comp));
+	g_return_if_fail (before_start_seconds >= 0);
+
+	e_cal_component_remove_alarm (comp, "x-evolution-default-alarm");
+
+	alarms = e_cal_component_get_all_alarms	(comp);
+	for (link = alarms; link; link = g_slist_next (link)) {
+		alarm = link->data;
+
+		if (e_cal_component_alarm_get_action (alarm) != E_CAL_COMPONENT_ALARM_DISPLAY)
+			continue;
+
+		trigger = e_cal_component_alarm_get_trigger (alarm);
+		if (!trigger ||
+		    e_cal_component_alarm_trigger_get_kind (trigger) != E_CAL_COMPONENT_ALARM_TRIGGER_RELATIVE_START)
+			continue;
+
+		duration = e_cal_component_alarm_trigger_get_duration (trigger);
+		if (!duration || !i_cal_duration_is_neg (duration))
+			continue;
+
+		if (i_cal_duration_as_int (duration) == (-1) * before_start_seconds)
+			break;
+	}
+
+	g_slist_free_full (alarms, e_cal_component_alarm_free);
+
+	/* Found existing alarm at the same time, skip this one */
+	if (link != NULL)
+		return;
+
+	alarm = e_cal_component_alarm_new ();
+	e_cal_component_alarm_set_uid (alarm, "x-evolution-default-alarm");
+	summary = e_cal_component_get_summary (comp);
+	e_cal_component_alarm_take_description (alarm, summary);
+	e_cal_component_alarm_set_action (alarm, E_CAL_COMPONENT_ALARM_DISPLAY);
+
+	duration = i_cal_duration_new_from_int (before_start_seconds);
+	i_cal_duration_set_is_neg (duration, TRUE);
+
+	trigger = e_cal_component_alarm_trigger_new_relative (E_CAL_COMPONENT_ALARM_TRIGGER_RELATIVE_START, duration);
+
+	g_object_unref (duration);
+
+	e_cal_component_alarm_take_trigger (alarm, trigger);
+	e_cal_component_add_alarm (comp, alarm);
+	e_cal_component_alarm_free (alarm);
+}
+
 /* Callback used from cal_recur_generate_instances(); generates triggers for all
  * of a component's RELATIVE alarms.
  */
@@ -442,10 +508,13 @@ add_alarm_occurrences_cb (ICalComponent *icalcomp,
 	GSList *link;
 	gchar *rid;
 
-	if (aod->comp)
+	if (aod->comp) {
 		comp = g_object_ref (aod->comp);
-	else
+	} else {
 		comp = e_cal_component_new_from_icalcomponent (i_cal_component_clone (icalcomp));
+		if (aod->def_reminder_before_start_seconds >= 0 && comp)
+			e_cal_util_add_alarm_before_start (comp, aod->def_reminder_before_start_seconds);
+	}
 
 	g_return_val_if_fail (comp != NULL, FALSE);
 
@@ -906,10 +975,16 @@ e_cal_util_generate_alarms_for_list (GList *comps,
  * @resolve_tzid: (closure user_data) (scope call): Callback for resolving timezones
  * @user_data: (closure): Data to be passed to the resolve_tzid callback
  * @default_timezone: The timezone used to resolve DATE and floating DATE-TIME values
+ * @def_reminder_before_start_seconds: add default reminder before start in seconds, when not negative value
+ * @cancellable: optional #GCancellable object, or %NULL
+ * @error: return location for a #GError, or %NULL
  *
  * Generates alarm instances for a calendar component with UID @uid,
  * which is stored within the @client. In contrast to e_cal_util_generate_alarms_for_comp(),
  * this function handles detached instances of recurring events properly.
+ *
+ * The @def_reminder_before_start_seconds, if not negative, causes addition of an alarm,
+ * which will trigger a "display" alarm these seconds before start of the event.
  *
  * Returns the instances structure, or %NULL if no alarm instances occurred in the specified
  * time range. Free the returned structure with e_cal_component_alarms_free(),
@@ -929,6 +1004,7 @@ e_cal_util_generate_alarms_for_uid_sync (ECalClient *client,
 					 ECalRecurResolveTimezoneCb resolve_tzid,
 					 gpointer user_data,
 					 ICalTimezone *default_timezone,
+					 gint def_reminder_before_start_seconds,
 					 GCancellable *cancellable,
 					 GError **error)
 {
@@ -949,7 +1025,12 @@ e_cal_util_generate_alarms_for_uid_sync (ECalClient *client,
 
 	for (link = objects; link; link = g_slist_next (link)) {
 		ECalComponent *comp = link->data;
-		GSList *auids = e_cal_component_get_alarm_uids (comp);
+		GSList *auids;
+
+		if (def_reminder_before_start_seconds >= 0)
+			e_cal_util_add_alarm_before_start (comp, def_reminder_before_start_seconds);
+
+		auids = e_cal_component_get_alarm_uids (comp);
 
 		if (auids) {
 			GSList *alink;
@@ -976,6 +1057,7 @@ e_cal_util_generate_alarms_for_uid_sync (ECalClient *client,
 	aod.start = start;
 	aod.end = end;
 	aod.omit = omit;
+	aod.def_reminder_before_start_seconds = def_reminder_before_start_seconds;
 	aod.only_check = FALSE;
 	aod.any_exists = FALSE;
 	aod.triggers = NULL;
@@ -2055,6 +2137,10 @@ check_first_instance_cb (ICalComponent *icalcomp,
 
 	g_return_val_if_fail (ifs != NULL, FALSE);
 
+	ifs->matches = i_cal_time_compare ((ICalTime *) ifs->rid, instance_start) == 0;
+	if (ifs->matches)
+		return FALSE;
+
 	prop = i_cal_component_get_first_property (icalcomp, I_CAL_RECURRENCEID_PROPERTY);
 	if (prop) {
 		rid = i_cal_property_get_recurrenceid (prop);
@@ -3104,10 +3190,13 @@ e_cal_util_inline_local_attachments_sync (ICalComponent *component,
 
 		attach = i_cal_property_get_attach (prop);
 		if (attach && i_cal_attach_get_is_url (attach)) {
-			const gchar *url;
+			const gchar *url_data;
+			gchar *url = NULL;
 
-			url = i_cal_attach_get_url (attach);
-			if (g_str_has_prefix (url, "file://")) {
+			url_data = i_cal_attach_get_url (attach);
+			url = url_data ? i_cal_value_decode_ical_string (url_data) : NULL;
+
+			if (url && g_str_has_prefix (url, "file://")) {
 				GFile *file;
 				gchar *basename;
 				gchar *content;
@@ -3155,6 +3244,8 @@ e_cal_util_inline_local_attachments_sync (ICalComponent *component,
 				g_object_unref (file);
 				g_free (basename);
 			}
+
+			g_free (url);
 		}
 
 		g_clear_object (&attach);
@@ -3399,16 +3490,21 @@ locale_equals_language (const gchar *locale,
 }
 
 /**
- * e_cal_util_component_find_property_for_locale:
+ * e_cal_util_component_find_property_for_locale_filtered:
  * @icalcomp: an #ICalComponent
  * @prop_kind: an #ICalPropertyKind to traverse
  * @locale: (nullable): a locale identifier, or %NULL
+ * @func: (scope call) (nullable): an #ECalUtilFilterPropertyFunc, to determine whether a property can be considered
+ * @user_data: user data for the @func
  *
- * Searches properties of kind @prop_kind in the @icalcomp and returns
- * one, which is usable for the @locale. When @locale is %NULL,
- * the current locale is assumed. If no such property for the locale
- * exists either the one with no language parameter or the first
+ * Searches properties of kind @prop_kind in the @icalcomp, which can
+ * be filtered by the @func, and returns one, which is usable for the @locale.
+ * When @locale is %NULL, the current locale is assumed. If no such property
+ * for the locale exists either the one with no language parameter or the first
  * found is returned.
+ *
+ * The @func is called before checking of the applicability for the @locale.
+ * When the @func is %NULL, all the properties of the @prop_kind are considered.
  *
  * Free the returned non-NULL #ICalProperty with g_object_unref(),
  * when no longer needed.
@@ -3416,13 +3512,14 @@ locale_equals_language (const gchar *locale,
  * Returns: (transfer full) (nullable): a property of kind @prop_kind for the @locale,
  *    %NULL if no such property is set on the @comp.
  *
- * Since: 3.46
-
+ * Since: 3.52
  **/
 ICalProperty *
-e_cal_util_component_find_property_for_locale (ICalComponent *icalcomp,
-					       ICalPropertyKind prop_kind,
-					       const gchar *locale)
+e_cal_util_component_find_property_for_locale_filtered (ICalComponent *icalcomp,
+							ICalPropertyKind prop_kind,
+							const gchar *locale,
+							ECalUtilFilterPropertyFunc func,
+							gpointer user_data)
 {
 	ICalProperty *prop;
 	ICalProperty *result = NULL;
@@ -3447,6 +3544,9 @@ e_cal_util_component_find_property_for_locale (ICalComponent *icalcomp,
 	     prop;
 	     g_object_unref (prop), prop = i_cal_component_get_next_property (icalcomp, prop_kind)) {
 		ICalParameter *param;
+
+		if (func != NULL && !func (prop, user_data))
+			continue;
 
 		param = i_cal_property_get_first_parameter (prop, I_CAL_LANGUAGE_PARAMETER);
 		if (param) {
@@ -3503,6 +3603,36 @@ e_cal_util_component_find_property_for_locale (ICalComponent *icalcomp,
 	g_clear_pointer (&locale_variants, g_strfreev);
 
 	return result;
+}
+
+/**
+ * e_cal_util_component_find_property_for_locale:
+ * @icalcomp: an #ICalComponent
+ * @prop_kind: an #ICalPropertyKind to traverse
+ * @locale: (nullable): a locale identifier, or %NULL
+ *
+ * Searches properties of kind @prop_kind in the @icalcomp and returns
+ * one, which is usable for the @locale. When @locale is %NULL,
+ * the current locale is assumed. If no such property for the locale
+ * exists either the one with no language parameter or the first
+ * found is returned.
+ *
+ * Free the returned non-NULL #ICalProperty with g_object_unref(),
+ * when no longer needed.
+ *
+ * Returns: (transfer full) (nullable): a property of kind @prop_kind for the @locale,
+ *    %NULL if no such property is set on the @comp.
+ *
+ * Since: 3.46
+ **/
+ICalProperty *
+e_cal_util_component_find_property_for_locale (ICalComponent *icalcomp,
+					       ICalPropertyKind prop_kind,
+					       const gchar *locale)
+{
+	g_return_val_if_fail (I_CAL_IS_COMPONENT (icalcomp), NULL);
+
+	return e_cal_util_component_find_property_for_locale_filtered (icalcomp, prop_kind, locale, NULL, NULL);
 }
 
 /**

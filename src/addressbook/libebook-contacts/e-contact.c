@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /* e-contact.c
  *
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
@@ -1548,10 +1547,10 @@ e_contact_get_property (GObject *object,
 		if (info->t & E_CONTACT_FIELD_TYPE_STRUCT) {
 			g_value_set_boxed (value, data);
 		} else {
-			g_value_set_string (value, data);
+			g_value_take_string (value, data);
 		}
 	} else if (info->t & E_CONTACT_FIELD_TYPE_STRING) {
-		g_value_set_string (value, data);
+		g_value_take_string (value, data);
 	} else {
 		g_value_set_pointer (value, data);
 	}

@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -91,6 +90,8 @@ enum {
 };
 
 G_DEFINE_TYPE_WITH_PRIVATE (CamelGpgContext, camel_gpg_context, CAMEL_TYPE_CIPHER_CONTEXT)
+
+static gboolean glob_gpg_ctx_can_load_photos = TRUE;
 
 static const gchar *gpg_ctx_get_executable_name (void);
 
@@ -294,7 +295,7 @@ struct _GpgCtx {
 	CamelSession *session;
 	GCancellable *cancellable;
 	GHashTable *userid_hint;
-	pid_t pid;
+	GPid pid;
 
 	GSList *userids;
 	gchar *sigfile;
@@ -325,7 +326,7 @@ struct _GpgCtx {
 	gchar *photos_filename;
 	gchar *viewer_cmd;
 
-	GString *decrypt_extra_text; /* Text received during decryption, which is in the blob, but is not encrypted */
+	gchar *bad_decrypt_error;
 
 	gint exit_status;
 
@@ -354,7 +355,6 @@ struct _GpgCtx {
 	guint trust : 3;
 	guint processing : 1;
 	guint bad_decrypt : 1;
-	guint in_decrypt_stage : 1;
 	guint noseckey : 1;
 	GString *signers;
 	GHashTable *signers_keyid;
@@ -432,14 +432,13 @@ gpg_ctx_new (CamelCipherContext *context,
 	gpg->trust = GPG_TRUST_NONE;
 	gpg->processing = FALSE;
 	gpg->bad_decrypt = FALSE;
-	gpg->in_decrypt_stage = FALSE;
 	gpg->noseckey = FALSE;
 	gpg->signers = NULL;
 	gpg->signers_keyid = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
 
 	gpg->istream = NULL;
 	gpg->ostream = NULL;
-	gpg->decrypt_extra_text = NULL;
+	gpg->bad_decrypt_error = NULL;
 
 	gpg->diagbuf = g_byte_array_new ();
 	gpg->diagflushed = FALSE;
@@ -723,8 +722,7 @@ gpg_ctx_free (struct _GpgCtx *gpg)
 	g_free (gpg->photos_filename);
 	g_free (gpg->viewer_cmd);
 
-	if (gpg->decrypt_extra_text)
-		g_string_free (gpg->decrypt_extra_text, TRUE);
+	g_free (gpg->bad_decrypt_error);
 
 	g_slice_free (struct _GpgCtx, gpg);
 }
@@ -988,6 +986,9 @@ gpg_ctx_get_argv (struct _GpgCtx *gpg,
 		g_ptr_array_add (argv, (guint8 *) "--export");
 		g_ptr_array_add (argv, (guint8 *) "--export-options");
 		g_ptr_array_add (argv, (guint8 *) "export-minimal,no-export-attributes");
+		g_ptr_array_add (argv, (guint8 *) "--export-filter");
+		g_ptr_array_add (argv, (guint8 *) "drop-subkey='expired -t || revoked -t || disabled -t || usage!~e'");
+
 		if (gpg->userids) {
 			GSList *uiter;
 
@@ -1049,26 +1050,39 @@ gpg_ctx_get_argv (struct _GpgCtx *gpg,
 
 #endif
 
+static void
+camel_gpg_ctx_close_pipe (gint pp[2])
+{
+	if (pp[0] != -1) {
+		close (pp[0]);
+		pp[0] = -1;
+	}
+	if (pp[1] != -1) {
+		close (pp[1]);
+		pp[1] = -1;
+	}
+}
+
 static gboolean
 gpg_ctx_op_start (struct _GpgCtx *gpg,
                   GError **error)
 {
 #ifndef G_OS_WIN32
 	gchar *status_fd = NULL, *command_fd = NULL;
-	gint i, maxfd, errnosave, fds[10];
+	gint errnosave;
+	gint status_pipe[2] = { -1, -1 }, command_pipe[2] = { -1, -1 };
+	gint pass_fds[2] = { -1, -1 };
 	GPtrArray *argv;
+	GError *local_error = NULL;
 	gint flags;
+	gboolean success;
 
-	for (i = 0; i < 10; i++)
-		fds[i] = -1;
+	if (pipe (status_pipe) == -1)
+		goto exception;
+	if (gpg->need_command_fd && pipe (command_pipe) == -1)
+		goto exception;
 
-	maxfd = gpg->need_command_fd ? 10 : 8;
-	for (i = 0; i < maxfd; i += 2) {
-		if (pipe (fds + i) == -1)
-			goto exception;
-	}
-
-	argv = gpg_ctx_get_argv (gpg, fds[7], &status_fd, fds[8], &command_fd);
+	argv = gpg_ctx_get_argv (gpg, status_pipe[1], &status_fd, command_pipe[0], &command_fd);
 
 	if (camel_debug_start ("gpg")) {
 		guint ii;
@@ -1084,59 +1098,28 @@ gpg_ctx_op_start (struct _GpgCtx *gpg,
 		camel_debug_end ();
 	}
 
-	if (!(gpg->pid = fork ())) {
-		/* child process */
+	pass_fds[0] = status_pipe[1];
+	pass_fds[1] = command_pipe[0];
 
-		if ((dup2 (fds[0], STDIN_FILENO) < 0 ) ||
-		    (dup2 (fds[3], STDOUT_FILENO) < 0 ) ||
-		    (dup2 (fds[5], STDERR_FILENO) < 0 )) {
-			_exit (255);
-		}
-
-		/* Dissociate from camel's controlling terminal so
-		 * that gpg won't be able to read from it.
-		 */
-		setsid ();
-
-		maxfd = sysconf (_SC_OPEN_MAX);
-		/* Loop over all fds. */
-		for (i = 3; i < maxfd; i++) {
-			/* don't close the status-fd or passwd-fd */
-			if (i != fds[7] && i != fds[8]) {
-				if (fcntl (i, F_SETFD, FD_CLOEXEC) == -1) {
-					/* Do nothing here. Cannot use CHECK_CALL() macro here, because
-					   it makes the process stuck, possibly due to the debug print. */
-				}
-			}
-		}
-
-		/* run gpg */
-		execvp (gpg_ctx_get_executable_name (), (gchar **) argv->pdata);
-		_exit (255);
-	} else if (gpg->pid < 0) {
-		g_ptr_array_free (argv, TRUE);
-		g_free (status_fd);
-		g_free (command_fd);
-		goto exception;
-	}
+	success = g_spawn_async_with_pipes_and_fds (NULL, (const gchar * const  *) argv->pdata, NULL,
+		G_SPAWN_DO_NOT_REAP_CHILD | G_SPAWN_SEARCH_PATH, NULL, NULL,
+		-1, -1, -1, pass_fds, pass_fds, 1 + (gpg->need_command_fd ? 1 : 0),
+		&gpg->pid, &gpg->stdin_fd, &gpg->stdout_fd, &gpg->stderr_fd,
+		&local_error);
 
 	g_ptr_array_free (argv, TRUE);
 	g_free (status_fd);
 	g_free (command_fd);
 
-	/* Parent */
-	close (fds[0]);
-	gpg->stdin_fd = fds[1];
-	gpg->stdout_fd = fds[2];
-	close (fds[3]);
-	gpg->stderr_fd = fds[4];
-	close (fds[5]);
-	gpg->status_fd = fds[6];
-	close (fds[7]);
+	if (!success)
+		goto exception;
+
+	gpg->status_fd = status_pipe[0];
+	close (status_pipe[1]);
 
 	if (gpg->need_command_fd) {
-		close (fds[8]);
-		gpg->command_fd = fds[9];
+		close (command_pipe[0]);
+		gpg->command_fd = command_pipe[1];
 		flags = fcntl (gpg->command_fd, F_GETFL);
 		CHECK_CALL (fcntl (gpg->command_fd, F_SETFL, flags | O_NONBLOCK));
 	}
@@ -1159,10 +1142,8 @@ exception:
 
 	errnosave = errno;
 
-	for (i = 0; i < 10; i++) {
-		if (fds[i] != -1)
-			close (fds[i]);
-	}
+	camel_gpg_ctx_close_pipe (status_pipe);
+	camel_gpg_ctx_close_pipe (command_pipe);
 
 	errno = errnosave;
 #else
@@ -1172,7 +1153,9 @@ exception:
 	errno = EINVAL;
 #endif
 
-	if (errno != 0)
+	if (local_error)
+		g_propagate_error (error, local_error);
+	else if (errno != 0)
 		g_set_error (
 			error, G_IO_ERROR,
 			g_io_error_from_errno (errno),
@@ -1275,7 +1258,7 @@ gpg_ctx_parse_status (struct _GpgCtx *gpg,
 	while (inptr < gpg->statusptr && *inptr != '\n')
 		inptr++;
 
-	if (*inptr != '\n') {
+	if (inptr >= gpg->statusptr || *inptr != '\n') {
 		/* we don't have enough data buffered to parse this status line */
 		return 0;
 	}
@@ -1540,18 +1523,18 @@ gpg_ctx_parse_status (struct _GpgCtx *gpg,
 		case GPG_CTX_MODE_DECRYPT:
 			if (!strncmp ((gchar *) status, "BEGIN_DECRYPTION", 16)) {
 				gpg->bad_decrypt = FALSE;
-				/* Mark it's expected to get decrypted data on stdout */
-				gpg->in_decrypt_stage = TRUE;
 				break;
 			} else if (!strncmp ((gchar *) status, "END_DECRYPTION", 14)) {
-				/* Mark to no longer expect decrypted data */
-				gpg->in_decrypt_stage = FALSE;
 				break;
 			} else if (!strncmp ((gchar *) status, "NO_SECKEY ", 10)) {
 				gpg->noseckey = TRUE;
 				break;
 			} else if (!strncmp ((gchar *) status, "DECRYPTION_FAILED", 17)) {
 				gpg->bad_decrypt = TRUE;
+				break;
+			} else if (!strncmp ((gchar *) status, "ERROR ", 6)) {
+				gpg->bad_decrypt = TRUE;
+				gpg->bad_decrypt_error = g_strdup ((const gchar *) status + 6);
 				break;
 			}
 			/* let if fall through to verify possible signatures too */
@@ -1824,7 +1807,6 @@ gpg_ctx_op_step (struct _GpgCtx *gpg,
 	GPollFD polls[6];
 	gint status, i;
 	gboolean read_data = FALSE, wrote_data = FALSE;
-	gboolean was_in_decrypt_stage;
 
 	for (i = 0; i < 6; i++) {
 		polls[i].fd = -1;
@@ -1877,8 +1859,6 @@ gpg_ctx_op_step (struct _GpgCtx *gpg,
 	 * can to all of them. If one fails along the way, return
 	 * -1. */
 
-	was_in_decrypt_stage = gpg->in_decrypt_stage;
-
 	if (polls[2].revents & (G_IO_IN | G_IO_HUP)) {
 		/* read the status message and decide what to do... */
 		gchar buffer[4096];
@@ -1917,41 +1897,34 @@ gpg_ctx_op_step (struct _GpgCtx *gpg,
 			goto exception;
 
 		if (nread > 0) {
-			if (gpg->mode != GPG_CTX_MODE_DECRYPT ||
-			    gpg->in_decrypt_stage || was_in_decrypt_stage) {
-				gboolean done = FALSE;
+			gboolean done = FALSE;
 
-				while (!done) {
-					gsize written = camel_stream_write (
-						gpg->ostream, buffer, (gsize)
-						nread, cancellable, error);
-					if (written != nread)
-						return -1;
+			while (!done) {
+				gsize written = camel_stream_write (
+					gpg->ostream, buffer, (gsize)
+					nread, cancellable, error);
+				if (written != nread)
+					return -1;
 
-					done = TRUE;
+				done = TRUE;
 
-					/* Read everything cached */
+				/* Read everything cached */
+				do {
+					polls[0].revents = 0;
+					status = g_poll (polls, 1, 5);
+				} while (status == -1 && errno == EINTR);
+
+				if (status != -1 && status != 0 && (polls[0].revents & (G_IO_IN | G_IO_HUP))) {
 					do {
-						polls[0].revents = 0;
-						status = g_poll (polls, 1, 5);
-					} while (status == -1 && errno == EINTR);
+						nread = read (gpg->stdout_fd, buffer, sizeof (buffer));
+						d (printf ("   cached read %d bytes (%.*s)\n", (gint) nread, (gint) nread, buffer));
+					} while (nread == -1 && (errno == EINTR || errno == EAGAIN));
 
-					if (status != -1 && status != 0 && (polls[0].revents & (G_IO_IN | G_IO_HUP))) {
-						do {
-							nread = read (gpg->stdout_fd, buffer, sizeof (buffer));
-							d (printf ("   cached read %d bytes (%.*s)\n", (gint) nread, (gint) nread, buffer));
-						} while (nread == -1 && (errno == EINTR || errno == EAGAIN));
+					if (nread == -1)
+						goto exception;
 
-						if (nread == -1)
-							goto exception;
-
-						done = !nread;
-					}
+					done = !nread;
 				}
-			} else {
-				if (!gpg->decrypt_extra_text)
-					gpg->decrypt_extra_text = g_string_new ("");
-				g_string_append_len (gpg->decrypt_extra_text, buffer, nread);
 			}
 		} else {
 			gpg->seen_eof1 = TRUE;
@@ -2549,6 +2522,12 @@ gpg_context_decode_to_stream (CamelMimePart *part,
 }
 
 static gboolean
+camel_gpg_context_is_show_photos_error (const gchar *diagnostics)
+{
+	return diagnostics && strstr (diagnostics, "show-photos");
+}
+
+static gboolean
 gpg_sign_sync (CamelCipherContext *context,
                const gchar *userid,
                CamelCipherHash hash,
@@ -2700,6 +2679,7 @@ gpg_sign_sync (CamelCipherContext *context,
 
 fail:
 	g_object_unref (ostream);
+	g_object_unref (istream);
 
 	if (gpg)
 		gpg_ctx_free (gpg);
@@ -2724,7 +2704,7 @@ gpg_verify_sync (CamelCipherContext *context,
 	CamelMultipart *mps;
 	CamelStream *filter;
 	CamelMimeFilter *canon;
-	gboolean is_retry = FALSE;
+	gboolean is_retry = FALSE, is_photo_retry = FALSE;
 
 	class = CAMEL_CIPHER_CONTEXT_GET_CLASS (context);
 
@@ -2848,7 +2828,7 @@ gpg_verify_sync (CamelCipherContext *context,
 
 	gpg = gpg_ctx_new (context, cancellable);
 	gpg_ctx_set_mode (gpg, GPG_CTX_MODE_VERIFY);
-	gpg_ctx_set_load_photos (gpg, camel_cipher_can_load_photos ());
+	gpg_ctx_set_load_photos (gpg, glob_gpg_ctx_can_load_photos && camel_cipher_can_load_photos ());
 	if (sigfile)
 		gpg_ctx_set_sigfile (gpg, sigfile);
 	gpg_ctx_set_istream (gpg, canon_stream);
@@ -2868,9 +2848,17 @@ gpg_verify_sync (CamelCipherContext *context,
 
 	/* report error only when no data or didn't found signature */
 	if (gpg_ctx_op_wait (gpg) != 0 && (gpg->nodata || !gpg->hadsig)) {
-		const gchar *diagnostics;
-
 		diagnostics = gpg_ctx_get_diagnostics (gpg);
+
+		if (gpg->load_photos && !is_photo_retry && camel_gpg_context_is_show_photos_error (diagnostics)) {
+			gpg_ctx_free (gpg);
+			g_object_unref (canon_stream);
+			is_photo_retry = TRUE;
+			/* this gpg version does not know how to load photos, disable it for this run */
+			glob_gpg_ctx_can_load_photos = FALSE;
+			goto retry;
+		}
+
 		g_set_error (
 			error, CAMEL_ERROR, CAMEL_ERROR_GENERIC, "%s",
 			(diagnostics != NULL && *diagnostics != '\0') ?
@@ -3111,6 +3099,7 @@ gpg_decrypt_sync (CamelCipherContext *context,
 	CamelMultipart *mp;
 	CamelContentType *ct;
 	gboolean success;
+	gboolean is_photo_retry = FALSE;
 
 	if (!ipart) {
 		g_set_error (
@@ -3129,6 +3118,8 @@ gpg_decrypt_sync (CamelCipherContext *context,
 	}
 
 	ct = camel_data_wrapper_get_mime_type_field (content);
+
+ retry:
 	/* Encrypted part (using our fake mime type) or PGP/Mime multipart */
 	if (camel_content_type_is (ct, "multipart", "encrypted")) {
 		mp = (CamelMultipart *) camel_medium_get_content ((CamelMedium *) ipart);
@@ -3165,7 +3156,7 @@ gpg_decrypt_sync (CamelCipherContext *context,
 
 	gpg = gpg_ctx_new (context, cancellable);
 	gpg_ctx_set_mode (gpg, GPG_CTX_MODE_DECRYPT);
-	gpg_ctx_set_load_photos (gpg, camel_cipher_can_load_photos ());
+	gpg_ctx_set_load_photos (gpg, glob_gpg_ctx_can_load_photos && camel_cipher_can_load_photos ());
 	gpg_ctx_set_istream (gpg, istream);
 	gpg_ctx_set_ostream (gpg, ostream);
 
@@ -3189,6 +3180,17 @@ gpg_decrypt_sync (CamelCipherContext *context,
 		const gchar *diagnostics;
 
 		diagnostics = gpg_ctx_get_diagnostics (gpg);
+
+		if (gpg->load_photos && !is_photo_retry && camel_gpg_context_is_show_photos_error (diagnostics)) {
+			g_object_unref (ostream);
+			g_object_unref (istream);
+			gpg_ctx_free (gpg);
+			is_photo_retry = TRUE;
+			/* this gpg version does not know how to load photos, disable it for this run */
+			glob_gpg_ctx_can_load_photos = FALSE;
+			goto retry;
+		}
+
 		g_set_error (
 			error, CAMEL_ERROR, CAMEL_ERROR_GENERIC, "%s",
 			(diagnostics != NULL && *diagnostics != '\0') ?
@@ -3208,6 +3210,12 @@ gpg_decrypt_sync (CamelCipherContext *context,
 		g_set_error (
 			error, CAMEL_ERROR, CAMEL_ERROR_GENERIC,
 			_("Failed to decrypt MIME part: Secret key not found"));
+	} else if (gpg->bad_decrypt) {
+		success = FALSE;
+		g_set_error (
+			error, CAMEL_ERROR, CAMEL_ERROR_GENERIC,
+			_("Failed to decrypt MIME part: %s"),
+			(gpg->bad_decrypt_error && *gpg->bad_decrypt_error) ? gpg->bad_decrypt_error : _("Unknown error"));
 	} else if (camel_content_type_is (ct, "multipart", "encrypted")) {
 		CamelDataWrapper *dw;
 		CamelStream *null = camel_stream_null_new ();
@@ -3243,10 +3251,7 @@ gpg_decrypt_sync (CamelCipherContext *context,
 
 	if (success) {
 		valid = camel_cipher_validity_new ();
-		if (gpg->decrypt_extra_text)
-			valid->encrypt.description = g_strdup_printf (_("GPG blob contains unencrypted text: %s"), gpg->decrypt_extra_text->str);
-		else
-			valid->encrypt.description = g_strdup (_("Encrypted content"));
+		valid->encrypt.description = g_strdup (_("Encrypted content"));
 		valid->encrypt.status = CAMEL_CIPHER_VALIDITY_ENCRYPT_ENCRYPTED;
 
 		if (gpg->hadsig) {

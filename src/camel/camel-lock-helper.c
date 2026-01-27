@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -47,14 +46,14 @@
 struct _lock_info {
 	struct _lock_info *next;
 	uid_t uid;
-	gint id;
+	guint32 id;
 	gint depth;
 	time_t stamp;		/* when last updated */
 	gchar path[1];
 };
 
 static gint lock_id = 0;
-static struct _lock_info *lock_info_list;
+static struct _lock_info *lock_info_list = NULL;
 static uid_t lock_root_uid = -1;
 static uid_t lock_real_uid = -1;
 
@@ -209,8 +208,8 @@ unlock_id (guint32 lockid)
 
 	d (fprintf (stderr, "unlocking id '%d'\n", lockid));
 
-	p = (struct _lock_info *) &lock_info_list;
-	info = p->next;
+	p = lock_info_list;
+	info = p;
 	while (info) {
 		if (info->id == lockid) {
 			d (fprintf (stderr, "found id %d path '%s'\n", lockid, info->path));
@@ -229,7 +228,10 @@ unlock_id (guint32 lockid)
 #endif
 					camel_unlock_dot (info->path);
 
-				p->next = info->next;
+				if (info == lock_info_list)
+					lock_info_list = info->next;
+				else
+					p->next = info->next;
 				free (info);
 			}
 

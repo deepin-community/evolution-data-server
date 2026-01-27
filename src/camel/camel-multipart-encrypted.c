@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*- */
 /*
  * Copyright (C) 1999-2008 Novell, Inc. (www.novell.com)
  *
@@ -19,6 +18,8 @@
 
 #include "evolution-data-server-config.h"
 
+#include <glib/gi18n-lib.h>
+
 #include "camel-multipart-encrypted.h"
 
 G_DEFINE_TYPE (
@@ -26,9 +27,21 @@ G_DEFINE_TYPE (
 	camel_multipart_encrypted,
 	CAMEL_TYPE_MULTIPART)
 
-static void
-camel_multipart_encrypted_class_init (CamelMultipartEncryptedClass *class)
+static gchar *
+multipart_encrypted_generate_preview (CamelMultipart *multipart,
+				      CamelGeneratePreviewFunc func,
+				      gpointer user_data)
 {
+	return g_strdup (_("Encrypted content"));
+}
+
+static void
+camel_multipart_encrypted_class_init (CamelMultipartEncryptedClass *klass)
+{
+	CamelMultipartClass *multipart_class;
+
+	multipart_class = CAMEL_MULTIPART_CLASS (klass);
+	multipart_class->generate_preview = multipart_encrypted_generate_preview;
 }
 
 static void
