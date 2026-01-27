@@ -1,4 +1,4 @@
-libedataserverui4-1.0.so.0 libedataserverui4-1.0-0t64 #MINVER#
+libedataserverui4-1.0.so.0 libedataserverui4-1.0-0 #MINVER#
 * Build-Depends-Package: libedataserverui4-dev
  _libedataserverui_box_pack_start@Base 3.45.2
  _libedataserverui_dialog_run@Base 3.45.2

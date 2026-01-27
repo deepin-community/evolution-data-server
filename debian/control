@@ -59,7 +59,7 @@ Package: evolution-data-server
 Architecture: any
 Depends: evolution-data-server-common (>= ${source:Version}),
          gnome-keyring,
-         libcamel-1.2-64t64 (= ${binary:Version}),
+         libcamel-1.2-64 (= ${binary:Version}),
          ${misc:Depends},
          ${shlibs:Depends}
 Suggests: evolution
@@ -258,8 +258,8 @@ Description: GObject introspection for the EDataServerUI4 library
  library. It can be used by packages using the GIRepository format to
  generate dynamic bindings.
 
-Package: libcamel-1.2-64t64
-Provides: ${t64:Provides}
+Package: libcamel-1.2-64
+Provides: ${Provides}
 Replaces: libcamel-1.2-64
 Breaks: libcamel-1.2-64 (<< ${source:Version})
 Section: libs
@@ -279,7 +279,7 @@ Package: libcamel1.2-dev
 Section: libdevel
 Architecture: any
 Multi-Arch: same
-Depends: libcamel-1.2-64t64 (= ${binary:Version}),
+Depends: libcamel-1.2-64 (= ${binary:Version}),
          libglib2.0-dev (>= 2.40),
          libnspr4-dev,
          libnss3-dev,
@@ -297,8 +297,8 @@ Description: Development files for libcamel
  Evolution is the integrated mail, calendar, task and address book
  distributed suite from Novell, Inc.
 
-Package: libebackend-1.2-11t64
-Provides: ${t64:Provides}
+Package: libebackend-1.2-11
+Provides: ${Provides}
 Replaces: libebackend-1.2-11
 Breaks: libebackend-1.2-11 (<< ${source:Version})
 Section: libs
@@ -317,7 +317,7 @@ Package: libebackend1.2-dev
 Section: libdevel
 Architecture: any
 Multi-Arch: same
-Depends: libebackend-1.2-11t64 (= ${binary:Version}),
+Depends: libebackend-1.2-11 (= ${binary:Version}),
          libedataserver1.2-dev (= ${binary:Version}),
          libglib2.0-dev (>= 2.40),
          ${gir:Depends},
@@ -332,8 +332,8 @@ Description: Utility library for evolution data servers (development files)
  Evolution is the integrated mail, calendar, task and address book
  distributed suite from Novell, Inc.
 
-Package: libebook-1.2-21t64
-Provides: ${t64:Provides}
+Package: libebook-1.2-21
+Provides: ${Provides}
 Replaces: libebook-1.2-21
 Breaks: libebook-1.2-21 (<< ${source:Version})
 Section: libs
@@ -347,8 +347,8 @@ Description: Client library for evolution address books
  Evolution is the integrated mail, calendar, task and address book
  distributed suite from Novell, Inc.
 
-Package: libebook-contacts-1.2-4t64
-Provides: ${t64:Provides}
+Package: libebook-contacts-1.2-4
+Provides: ${Provides}
 Replaces: libebook-contacts-1.2-4
 Breaks: libebook-contacts-1.2-4 (<< ${source:Version})
 Section: libs
@@ -367,7 +367,7 @@ Section: libdevel
 Architecture: any
 Multi-Arch: same
 Depends: libcamel1.2-dev (= ${binary:Version}),
-         libebook-contacts-1.2-4t64 (= ${binary:Version}),
+         libebook-contacts-1.2-4 (= ${binary:Version}),
          libedataserver1.2-dev (= ${binary:Version}),
          ${gir:Depends},
          ${misc:Depends}
@@ -384,7 +384,7 @@ Section: libdevel
 Architecture: any
 Multi-Arch: same
 Depends: libcamel1.2-dev (= ${binary:Version}),
-         libebook-1.2-21t64 (= ${binary:Version}),
+         libebook-1.2-21 (= ${binary:Version}),
          libebook-contacts1.2-dev (= ${binary:Version}),
          libedata-book1.2-dev (= ${binary:Version}),
          libedataserver1.2-dev (= ${binary:Version}),
@@ -428,8 +428,8 @@ Description: Client library for evolution calendars (development files)
  .
  This package contains header files and static library for libecal.
 
-Package: libedata-book-1.2-27t64
-Provides: ${t64:Provides}
+Package: libedata-book-1.2-27
+Provides: ${Provides}
 Replaces: libedata-book-1.2-27
 Breaks: libedata-book-1.2-27 (<< ${source:Version})
 Section: libs
@@ -449,7 +449,7 @@ Architecture: any
 Multi-Arch: same
 Depends: libebackend1.2-dev (= ${binary:Version}),
          libebook-contacts1.2-dev (= ${binary:Version}),
-         libedata-book-1.2-27t64 (= ${binary:Version}),
+         libedata-book-1.2-27 (= ${binary:Version}),
          libglib2.0-dev (>= 2.40),
          ${gir:Depends},
          ${misc:Depends}
@@ -460,8 +460,8 @@ Description: Backend library for evolution address books (development files)
  .
  This package contains header files and static library for libedata-book.
 
-Package: libedata-cal-2.0-2t64
-Provides: ${t64:Provides}
+Package: libedata-cal-2.0-2
+Provides: ${Provides}
 Replaces: libedata-cal-2.0-2
 Breaks: libedata-cal-2.0-2 (<< ${source:Version})
 Section: libs
@@ -481,7 +481,7 @@ Architecture: any
 Multi-Arch: same
 Depends: libebackend1.2-dev (= ${binary:Version}),
          libecal2.0-dev (= ${binary:Version}),
-         libedata-cal-2.0-2t64 (= ${binary:Version}),
+         libedata-cal-2.0-2 (= ${binary:Version}),
          libglib2.0-dev (>= 2.40),
          libical-dev (>= 2.0),
          ${gir:Depends},
@@ -493,8 +493,8 @@ Description: Backend library for evolution calendars (development files)
  .
  This package contains header files and static library for libedata-cal.
 
-Package: libedataserver-1.2-27t64
-Provides: ${t64:Provides}
+Package: libedataserver-1.2-27
+Provides: ${Provides}
 Replaces: libedataserver-1.2-27
 Breaks: libedataserver-1.2-27 (<< ${source:Version})
 Section: libs
@@ -514,7 +514,7 @@ Section: libdevel
 Architecture: any
 Multi-Arch: same
 Depends: libcamel1.2-dev (= ${binary:Version}),
-         libedataserver-1.2-27t64 (= ${binary:Version}),
+         libedataserver-1.2-27 (= ${binary:Version}),
          libglib2.0-dev (>= 2.40),
          libjson-glib-dev (>= 1.0.4),
          libsecret-1-dev,
@@ -529,8 +529,8 @@ Description: Utility library for evolution data servers (development files)
  .
  This package contains header files and static library for libedataserver.
 
-Package: libedataserverui-1.2-4t64
-Provides: ${t64:Provides}
+Package: libedataserverui-1.2-4
+Provides: ${Provides}
 Replaces: libedataserverui-1.2-4
 Breaks: libedataserverui-1.2-4 (<< ${source:Version})
 Section: libs
@@ -553,7 +553,7 @@ Depends: libcamel1.2-dev (= ${binary:Version}),
          libecal2.0-dev (= ${binary:Version}),
          libedata-book1.2-dev,
          libedataserver1.2-dev (= ${binary:Version}),
-         libedataserverui-1.2-4t64 (= ${binary:Version}),
+         libedataserverui-1.2-4 (= ${binary:Version}),
          libglib2.0-dev (>= 2.40),
          libgtk-3-dev,
          libsecret-1-dev,
@@ -568,8 +568,8 @@ Description: Utility library for evolution data servers (development files)
  .
  This package contains development files for libedataserverui.
 
-Package: libedataserverui4-1.0-0t64
-Provides: ${t64:Provides}
+Package: libedataserverui4-1.0-0
+Provides: ${Provides}
 Replaces: libedataserverui4-1.0-0
 Breaks: libedataserverui4-1.0-0 (<< ${source:Version})
 Section: libs
@@ -592,7 +592,7 @@ Depends: libcamel1.2-dev (= ${binary:Version}),
          libecal2.0-dev (= ${binary:Version}),
          libedata-book1.2-dev,
          libedataserver1.2-dev (= ${binary:Version}),
-         libedataserverui4-1.0-0t64 (= ${binary:Version}),
+         libedataserverui4-1.0-0 (= ${binary:Version}),
          libglib2.0-dev (>= 2.40),
          libgtk-4-dev (>= 4.4),
          libsecret-1-dev,

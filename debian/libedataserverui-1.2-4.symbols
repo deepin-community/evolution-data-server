@@ -1,4 +1,4 @@
-libedataserverui-1.2.so.4 libedataserverui-1.2-4t64 #MINVER#
+libedataserverui-1.2.so.4 libedataserverui-1.2-4 #MINVER#
 * Build-Depends-Package: libedataserverui1.2-dev
  _libedataserverui_box_pack_start@Base 3.45.2
  _libedataserverui_dialog_run@Base 3.45.2

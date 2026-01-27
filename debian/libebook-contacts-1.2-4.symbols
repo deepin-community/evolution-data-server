@@ -1,4 +1,4 @@
-libebook-contacts-1.2.so.4 libebook-contacts-1.2-4t64 #MINVER#
+libebook-contacts-1.2.so.4 libebook-contacts-1.2-4 #MINVER#
 * Build-Depends-Package: libebook-contacts1.2-dev
  (c++|arch=!hppa !hurd-any)"typeinfo for i18n::phonenumbers::Logger@Base" 3.24.1
  (c++|arch=!hppa !hurd-any)"typeinfo name for i18n::phonenumbers::NullLogger@Base" 3.24.1

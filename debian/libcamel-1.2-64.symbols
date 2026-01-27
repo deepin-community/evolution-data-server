@@ -1,4 +1,4 @@
-libcamel-1.2.so.64 libcamel-1.2-64t64 #MINVER#
+libcamel-1.2.so.64 libcamel-1.2-64 #MINVER#
 * Build-Depends-Package: libcamel1.2-dev
  _camel_message_info_unset_summary@Base 3.24.3
  _camel_utils_initialize@Base 3.41.3
@@ -230,7 +230,7 @@ libcamel-1.2.so.64 libcamel-1.2-64t64 #MINVER#
  camel_fetch_type_get_type@Base 3.39.2
  camel_file_util_decode_fixed_int32@Base 3.19.92
  camel_file_util_decode_fixed_string@Base 3.19.92
- camel_file_util_decode_gint64@Base 3.49.2
+ camel_file_util_decode_gin@Base 3.49.2
  camel_file_util_decode_gsize@Base 3.19.92
  camel_file_util_decode_off_t@Base 3.19.92
  camel_file_util_decode_string@Base 3.19.92
@@ -238,7 +238,7 @@ libcamel-1.2.so.64 libcamel-1.2-64t64 #MINVER#
  camel_file_util_decode_uint32@Base 3.19.92
  camel_file_util_encode_fixed_int32@Base 3.19.92
  camel_file_util_encode_fixed_string@Base 3.19.92
- camel_file_util_encode_gint64@Base 3.49.2
+ camel_file_util_encode_gin@Base 3.49.2
  camel_file_util_encode_gsize@Base 3.19.92
  camel_file_util_encode_off_t@Base 3.19.92
  camel_file_util_encode_string@Base 3.19.92
