@@ -1,0 +1,67 @@
+From: Jordan Petridis <jpetridis@gnome.org>
+Date: Mon, 11 Nov 2024 17:26:11 +0000
+Subject: libedataserverui: Avoid initializing the icon_theme when building
+ introspection data
+Bug: https://gitlab.gnome.org/GNOME/evolution-data-server/-/issues/571
+Origin: upstream, https://gitlab.gnome.org/GNOME/evolution-data-server/-/commit/fab47760d3aa2b5d4f7aa878e0405e4327a5c188
+Applied-upstream: master, commit fab47760d3aa2b5d4f7aa878e0405e4327a5c188
+
+Backport of upstream commit fab47760d3aa for 3.50.1. The original commit
+message follows:
+
+  I#571 - libedataserverui: Avoid initializing the icon_theme when building
+  introspection data
+
+  When we are trying to generate the gobject-introspection data,
+  _libedataserverui_init_icon_theme will try to create a display without
+  gtk having been initialized before hand.
+
+  Add a gtk_init_check and assume that we will only run into this when
+  building and not at runtime.
+
+  Closes https://gitlab.gnome.org/GNOME/evolution-data-server/-/issues/571
+
+GTK 4.18 made this fatal: gdk_display_manager_get() now calls
+gdk_ensure_initialized() internally and aborts with
+
+  Gdk-ERROR **: gdk_display_manager_get() was called before gtk_init()
+
+when GTK is not initialized (GTK 4.16 and older created the display
+manager unconditionally, so this was harmless there).
+
+_libedataserverui_init_icon_theme() is called from the class_init() of
+ECredentialsPrompterImplPassword, which g-ir-scanner triggers while
+dumping type information, so generating EDataServerUI4-1.0.gir aborts
+the introspection helper with SIGTRAP and the package build fails with
+GTK 4.18:
+
+  [ 76%] Generating EDataServerUI4-1.0.gir
+  (process:28335): Gdk-ERROR **: gdk_display_manager_get() was called before gtk_init()
+  make[3]: *** [.../EDataServerUI4-1.0.gir] Error 1
+
+gtk_is_initialized() is available since GTK 4.4, which is the minimum
+version required by configure, so the guard is safe for all supported
+GTK 4 versions.
+---
+ src/libedataserverui/libedataserverui-private.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/libedataserverui/libedataserverui-private.c b/src/libedataserverui/libedataserverui-private.c
+index b4dfb51..201652b 100644
+--- a/src/libedataserverui/libedataserverui-private.c
++++ b/src/libedataserverui/libedataserverui-private.c
+@@ -62,6 +62,14 @@ _libedataserverui_init_icon_theme (void)
+ 	static gboolean icons_added = FALSE;
+ 
+ 	#if GTK_CHECK_VERSION(4, 0, 0)
++	/* We can't call gdk_display_manager_get if gtk is
++	 * not initialized. This can happen when we are building
++	 * gobject-introspection data or documentation */
++	if (!gtk_is_initialized ()) {
++		e_source_registry_debug_print ("%s: GTK is not initialized, skipping\n", G_STRFUNC);
++		return;
++	}
++
+ 	if (!icons_added) {
+ 		GdkDisplayManager *manager;
+ 

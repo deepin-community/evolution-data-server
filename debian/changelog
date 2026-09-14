@@ -1,3 +1,13 @@
+evolution-data-server (3.50.1-1deepin1) unstable; urgency=medium
+
+  * Add libedataserverui-gtk4-18-introspection.patch
+    - Skip the icon theme initialization when GTK is not initialized, so
+      generating EDataServerUI4-1.0.gir no longer aborts with GTK 4.18
+      ("gdk_display_manager_get() was called before gtk_init()")
+    - Backport of upstream commit fab47760d3aa (GNOME issue #571)
+
+ -- lichenggang <lichenggang@uniontech.com>  Mon, 14 Sep 2026 18:32:50 +0800
+
 evolution-data-server (3.50.1-1) unstable; urgency=medium
 
   * Team upload
